@@ -5,58 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joel Alvarado - Masseur | Réservation</title>
     
-    <!-- Scripts de base (CDN) -->
+    <!-- CSS et Polices -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; margin: 0; color: white; min-height: 100vh; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .bg-card { background-color: white; color: #0f172a; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .animate-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+
+    <!-- Scripts React et Firebase (Versions stables) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    
-    <!-- Firebase SDKs (Versions Compat pour HTML direct) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;600;800&display=swap');
-        
-        :root {
-            --navy: #0f172a;
-        }
-
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: var(--navy); 
-            margin: 0;
-            color: white;
-            min-height: 100vh;
-        }
-        
-        .font-serif { font-family: 'Playfair Display', serif; }
-        
-        /* Personnalisation Scrollbar */
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: #1e293b; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-
-        .animate-fade-in { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Utilitaire pour masquer la barre de défilement */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect } = React;
 
-        // --- Configuration Firebase ---
+        // --- CONFIGURATION FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDV_kmvQC6yAtA95efs33S17SiYopp0r2c",
             authDomain: "ak-minstep-consult-tracker.firebaseapp.com",
@@ -66,144 +42,94 @@
             appId: "1:1076236018116:web:43bc905a807e0410528491"
         };
 
-        // Initialisation Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const auth = firebase.auth();
         const appId = "joel-alvarado-agenda";
 
-        // Composant Icône (Utilise Lucide)
+        // --- COMPOSANT ICONE ---
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => {
-                if (window.lucide) window.lucide.createIcons();
-            }, [name]);
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`}></i>;
         };
 
-        const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
-        const DEFAULT_SERVICES = [
-            { id: '1', name: 'Massage Relaxant', duration: 60, price: 70 },
-            { id: '2', name: 'Massage Deep Tissue', duration: 60, price: 85 },
-            { id: '3', name: 'Massage Sportif', duration: 45, price: 65 }
-        ];
-
+        // --- APP PRINCIPALE ---
         function App() {
-            const [view, setView] = useState('client'); // 'client' ou 'admin'
+            const [isAdminMode, setIsAdminMode] = useState(false);
+            const [isAdminAuth, setIsAdminAuth] = useState(false);
             const [isLoaded, setIsLoaded] = useState(false);
+            
             const [appointments, setAppointments] = useState([]);
             const [dailySlots, setDailySlots] = useState({});
             const [massageTypes, setMassageTypes] = useState([]);
             const [settings, setSettings] = useState({ whatsapp: "33600000000", adminPass: "1234" });
-            
-            // États de l'espace Admin
-            const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-            const [adminPassInput, setAdminPassInput] = useState('');
-            const [adminTab, setAdminTab] = useState('list');
-            const [adminDate, setAdminDate] = useState(new Date());
-            const [loginError, setLoginError] = useState(false);
 
-            // États de l'espace Client
+            // Navigation Client
             const [step, setStep] = useState(1);
-            const [selectedSvc, setSelectedSvc] = useState(null);
-            const [selectedDate, setSelectedDate] = useState(new Date());
-            const [selectedTime, setSelectedTime] = useState(null);
-            const [clientForm, setClientForm] = useState({ name: '', phone: '', notes: '' });
-            const [bookingLoading, setBookingLoading] = useState(false);
+            const [selSvc, setSelSvc] = useState(null);
+            const [selDate, setSelDate] = useState(new Date());
+            const [selTime, setSelTime] = useState(null);
+            const [form, setForm] = useState({ name: '', phone: '' });
+
+            // Navigation Admin
+            const [adminTab, setAdminTab] = useState('list');
+            const [passInput, setPassInput] = useState('');
 
             useEffect(() => {
-                // Détection auto du mode admin via l'URL (?admin=true)
+                // Détection immédiate du mode via l'URL
                 const params = new URLSearchParams(window.location.search);
-                if (params.get('admin') === 'true') {
-                    setView('admin');
-                } else {
-                    setView('client');
-                }
+                setIsAdminMode(params.get('admin') === 'true');
 
-                // Authentification Anonyme pour Firestore
+                // Auth Anonyme pour accès aux données
                 auth.signInAnonymously().catch(console.error);
 
-                // Synchronisation Cloud Firestore
-                const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
+                // Connexion Temps Réel
+                const dataRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
                 
-                const unsubApts = baseRef.collection('appointments').onSnapshot(snap => {
-                    setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                const unsubApts = dataRef.collection('appointments').onSnapshot(s => {
+                    setAppointments(s.docs.map(d => ({ id: d.id, ...d.data() })));
                     setIsLoaded(true);
                 });
 
-                const unsubAvail = baseRef.collection('settings').doc('availability').onSnapshot(snap => {
-                    if (snap.exists) setDailySlots(snap.data().slots || {});
+                const unsubAvail = dataRef.collection('settings').doc('availability').onSnapshot(s => {
+                    if (s.exists) setDailySlots(s.data().slots || {});
                 });
 
-                const unsubConfig = baseRef.collection('settings').doc('config').onSnapshot(snap => {
-                    if (snap.exists) setSettings(prev => ({ ...prev, ...snap.data() }));
+                const unsubSvcs = dataRef.collection('settings').doc('services').onSnapshot(s => {
+                    if (s.exists) setMassageTypes(s.data().list || []);
+                    else setMassageTypes([
+                        { id: '1', name: 'Massage Relaxant', duration: 60, price: 70 },
+                        { id: '2', name: 'Deep Tissue', duration: 60, price: 85 }
+                    ]);
                 });
 
-                const unsubSvcs = baseRef.collection('settings').doc('services').onSnapshot(snap => {
-                    if (snap.exists) setMassageTypes(snap.data().list || DEFAULT_SERVICES);
-                    else {
-                        baseRef.collection('settings').doc('services').set({ list: DEFAULT_SERVICES });
-                        setMassageTypes(DEFAULT_SERVICES);
-                    }
+                const unsubConf = dataRef.collection('settings').doc('config').onSnapshot(s => {
+                    if (s.exists) setSettings(prev => ({ ...prev, ...s.data() }));
                 });
 
-                return () => { unsubApts(); unsubAvail(); unsubConfig(); unsubSvcs(); };
+                return () => { unsubApts(); unsubAvail(); unsubSvcs(); unsubConf(); };
             }, []);
 
-            const getDateKey = (date) => date.toISOString().split('T')[0];
+            const getDateStr = (d) => d.toISOString().split('T')[0];
 
-            const getAvailableTimes = (date) => {
-                const key = getDateKey(date);
-                const slots = dailySlots[key] || [];
-                const booked = appointments.filter(a => a.date === key).map(a => a.time);
-                return slots.filter(t => !booked.includes(t)).sort();
-            };
-
-            const confirmBooking = async () => {
-                setBookingLoading(true);
-                const booking = {
-                    ...clientForm,
-                    serviceName: selectedSvc.name,
-                    date: getDateKey(selectedDate),
-                    time: selectedTime,
-                    isNew: true,
-                    createdAt: new Date().toISOString()
-                };
-                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').add(booking);
-                setStep(4);
-                setBookingLoading(false);
-            };
-
-            const handleLogin = () => {
-                if (adminPassInput === settings.adminPass || adminPassInput === "1234") {
-                    setIsAdminAuthenticated(true);
-                    setLoginError(false);
-                } else {
-                    setLoginError(true);
-                }
-            };
-
-            if (!isLoaded) return <div className="flex items-center justify-center h-screen text-white font-bold text-xl">Joel Alvarado...</div>;
-
-            // --- VUE CLIENT (UNIQUEMENT RÉSERVATION) ---
-            if (view === 'client') {
+            // --- VUE CLIENT ---
+            if (!isAdminMode) {
                 return (
-                    <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col text-slate-900 animate-fade-in border-x border-slate-800">
+                    <div className="max-w-md mx-auto bg-white min-h-screen flex flex-col text-slate-900 animate-in">
                         <div className="bg-[#0f172a] p-10 text-white text-center shadow-lg">
-                            <h1 className="text-3xl font-serif font-bold tracking-tight">Joel Alvarado</h1>
+                            <h1 className="text-3xl font-serif font-bold">Joel Alvarado</h1>
                             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] mt-1">Masseur Professionnel</p>
                         </div>
 
                         <div className="p-6 flex-grow overflow-y-auto no-scrollbar">
                             {step === 1 && (
                                 <div className="space-y-4">
-                                    <h2 className="text-center font-serif text-xl mb-8">Quel soin désirez-vous ?</h2>
+                                    <h2 className="text-center font-serif text-xl mb-8">Choisissez votre soin</h2>
                                     {massageTypes.map(s => (
-                                        <button key={s.id} onClick={() => { setSelectedSvc(s); setStep(2); }} className="w-full text-left p-6 border border-slate-100 rounded-3xl flex justify-between items-center group hover:border-[#0f172a] transition-all active:scale-95 shadow-sm">
+                                        <button key={s.id} onClick={() => { setSelSvc(s); setStep(2); }} className="w-full text-left p-6 border rounded-3xl flex justify-between items-center group active:scale-95 shadow-sm">
                                             <div>
-                                                <h3 className="font-bold text-lg text-slate-800 group-hover:text-[#0f172a]">{s.name}</h3>
-                                                <p className="text-xs text-slate-400 font-bold">{s.duration} min • {s.price}€</p>
+                                                <h3 className="font-bold text-lg">{s.name}</h3>
+                                                <p className="text-xs text-slate-400">{s.duration} min • {s.price}€</p>
                                             </div>
                                             <Icon name="chevron-right" className="text-slate-200 group-hover:text-[#0f172a]" />
                                         </button>
@@ -213,65 +139,64 @@
 
                             {step === 2 && (
                                 <div className="space-y-6">
-                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-slate-400 flex items-center gap-1"><Icon name="arrow-left" size={14}/> Retour</button>
-                                    <h2 className="text-center font-serif text-xl">Disponibilités</h2>
-                                    <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100">
+                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-slate-400"><Icon name="arrow-left" size={14}/> Retour</button>
+                                    <div className="bg-slate-50 p-6 rounded-[2rem]">
                                         <div className="flex justify-between items-center mb-6 text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">
-                                            <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(d); }}><Icon name="chevron-left"/></button>
-                                            <span>{MONTHS[selectedDate.getMonth()]} {selectedDate.getFullYear()}</span>
-                                            <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 7); setSelectedDate(d); }}><Icon name="chevron-right"/></button>
+                                            <button onClick={() => { const d = new Date(selDate); d.setDate(d.getDate() - 7); setSelDate(d); }}><Icon name="chevron-left"/></button>
+                                            <span>Semaine du {selDate.getDate()}</span>
+                                            <button onClick={() => { const d = new Date(selDate); d.setDate(d.getDate() + 7); setSelDate(d); }}><Icon name="chevron-right"/></button>
                                         </div>
                                         <div className="grid grid-cols-7 gap-2">
                                             {[...Array(7)].map((_, i) => {
-                                                const d = new Date(selectedDate); d.setDate(selectedDate.getDate() - selectedDate.getDay() + i);
-                                                const isSel = d.toDateString() === selectedDate.toDateString();
-                                                const hasS = getAvailableTimes(d).length > 0;
+                                                const d = new Date(selDate); d.setDate(selDate.getDate() - selDate.getDay() + i);
+                                                const isSel = d.toDateString() === selDate.toDateString();
+                                                const hasS = (dailySlots[getDateStr(d)] || []).length > 0;
                                                 const isPast = d < new Date(new Date().setHours(0,0,0,0));
                                                 return (
-                                                    <button key={i} disabled={isPast || !hasS} onClick={() => setSelectedDate(d)} className={`aspect-square flex flex-col items-center justify-center rounded-2xl text-xs transition-all relative ${isSel ? 'bg-[#0f172a] text-white shadow-lg scale-110' : 'hover:bg-slate-200'} ${(!hasS || isPast) ? 'opacity-10 cursor-not-allowed' : 'font-bold text-slate-700'}`}>
+                                                    <button key={i} disabled={isPast || !hasS} onClick={() => setSelDate(d)} className={`aspect-square flex items-center justify-center rounded-2xl text-xs transition-all ${isSel ? 'bg-[#0f172a] text-white shadow-lg' : 'hover:bg-slate-200'} ${(!hasS || isPast) ? 'opacity-10 cursor-not-allowed' : 'font-bold'}`}>
                                                         {d.getDate()}
-                                                        {hasS && !isSel && !isPast && <div className="absolute bottom-1 w-1 h-1 bg-emerald-400 rounded-full"></div>}
                                                     </button>
                                                 );
                                             })}
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-3 gap-2 py-2">
-                                        {getAvailableTimes(selectedDate).map((t, idx) => (
-                                            <button key={idx} onClick={() => setSelectedTime(t)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === t ? 'bg-[#0f172a] border-[#0f172a] text-white' : 'bg-white border-slate-50 text-slate-500 hover:border-slate-200'}`}>{t}</button>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(dailySlots[getDateStr(selDate)] || []).map((t, idx) => (
+                                            <button key={idx} onClick={() => setSelTime(t)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selTime === t ? 'bg-[#0f172a] border-[#0f172a] text-white shadow-md' : 'bg-white text-slate-500'}`}>{t}</button>
                                         ))}
                                     </div>
-                                    {selectedTime && <button onClick={() => setStep(3)} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-xl active:scale-95 transition-all">Continuer</button>}
+                                    {selTime && <button onClick={() => setStep(3)} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-xl active:scale-95 transition-all">Continuer</button>}
                                 </div>
                             )}
 
                             {step === 3 && (
                                 <div className="space-y-6">
-                                    <button onClick={() => setStep(2)} className="text-xs font-bold text-slate-400 flex items-center gap-1"><Icon name="arrow-left" size={14}/> Retour</button>
-                                    <h2 className="text-center font-serif text-xl">Vos coordonnées</h2>
+                                    <button onClick={() => setStep(2)} className="text-xs font-bold text-slate-400"><Icon name="arrow-left" size={14}/> Retour</button>
                                     <div className="space-y-4">
-                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-2xl outline-none border border-transparent focus:border-slate-200 text-sm" placeholder="Nom complet" value={clientForm.name} onChange={e => setClientForm({...clientForm, name: e.target.value})} />
-                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-2xl outline-none border border-transparent focus:border-slate-200 text-sm" placeholder="Téléphone" value={clientForm.phone} onChange={e => setClientForm({...clientForm, phone: e.target.value})} />
-                                        <textarea className="w-full p-5 bg-slate-50 rounded-2xl min-h-[120px] outline-none border border-transparent focus:border-slate-200 text-sm" placeholder="Notes éventuelles..." value={clientForm.notes} onChange={e => setClientForm({...clientForm, notes: e.target.value})} />
+                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-2xl outline-none" placeholder="Nom complet" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-2xl outline-none" placeholder="Téléphone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
                                     </div>
-                                    <button disabled={!clientForm.name || !clientForm.phone || bookingLoading} onClick={confirmBooking} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-xl active:scale-95 transition-all disabled:bg-slate-200">
-                                        {bookingLoading ? "Chargement..." : "Confirmer le rendez-vous"}
-                                    </button>
+                                    <button disabled={!form.name || !form.phone} onClick={async () => {
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').add({
+                                            ...form, serviceName: selSvc.name, date: getDateStr(selDate), time: selTime, isNew: true, createdAt: new Date().toISOString()
+                                        });
+                                        setStep(4);
+                                    }} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-xl active:scale-95 transition-all disabled:bg-slate-200">Confirmer la séance</button>
                                 </div>
                             )}
 
                             {step === 4 && (
-                                <div className="text-center py-16 space-y-8 animate-fade-in">
+                                <div className="text-center py-16 space-y-8">
                                     <Icon name="check-circle" size={80} className="text-emerald-500 mx-auto" />
-                                    <h2 className="text-3xl font-serif font-bold text-slate-800">C'est réservé !</h2>
-                                    <p className="text-slate-400 text-sm px-6">Pour finaliser la réservation, veuillez m'envoyer la confirmation via WhatsApp.</p>
+                                    <h2 className="text-3xl font-serif font-bold">Réservé !</h2>
+                                    <p className="text-slate-400 text-sm px-6">Pour finaliser, cliquez sur le bouton ci-dessous pour m'envoyer la confirmation via WhatsApp.</p>
                                     <button onClick={() => {
-                                        const msg = `Bonjour Joel ! Je confirme ma séance de ${selectedSvc.name} le ${getDateKey(selectedDate)} à ${selectedTime}. (Client: ${clientForm.name})`;
+                                        const msg = `Bonjour Joel ! Je confirme ma séance de ${selSvc.name} le ${getDateStr(selDate)} à ${selTime}. (Client: ${form.name})`;
                                         window.open(`https://wa.me/${settings.whatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
                                     }} className="w-full bg-[#25D366] text-white py-5 rounded-full font-black text-xs uppercase flex items-center justify-center gap-3 shadow-xl active:scale-95">
                                         <Icon name="message-square" /> Envoyer sur WhatsApp
                                     </button>
-                                    <button onClick={() => location.reload()} className="text-slate-300 font-bold text-[10px] uppercase tracking-widest hover:text-[#0f172a]">Fermer</button>
+                                    <button onClick={() => location.reload()} className="text-slate-300 font-bold text-[10px] uppercase tracking-widest">Retour</button>
                                 </div>
                             )}
                         </div>
@@ -279,192 +204,137 @@
                 );
             }
 
-            // --- VUE ADMIN (SÉCURISÉE) ---
-            if (!isAdminAuthenticated) {
+            // --- VUE ADMIN ---
+            if (!isAdminAuth) {
                 return (
-                    <div className="flex items-center justify-center min-h-screen bg-[#0f172a] p-6">
-                        <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl w-full max-w-md text-center text-slate-900 animate-fade-in">
+                    <div className="flex items-center justify-center min-h-screen p-6">
+                        <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl w-full max-w-md text-center text-slate-900 animate-in">
                             <Icon name="lock" size={56} className="text-[#0f172a] mx-auto mb-6" />
-                            <h1 className="text-2xl font-serif font-bold mb-2">Joel Alvarado</h1>
-                            <p className="text-slate-400 text-sm mb-10">Espace de Gestion</p>
-                            <input 
-                                type="password" 
-                                placeholder="Code d'accès" 
-                                className={`w-full p-5 bg-slate-50 rounded-2xl mb-4 text-center font-bold tracking-[0.5em] outline-none border-2 transition-colors ${loginError ? 'border-red-500' : 'focus:border-slate-900'}`} 
-                                value={adminPassInput} 
-                                onChange={e => setAdminPassInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                            />
-                            {loginError && <p className="text-red-500 text-[10px] font-bold mb-4 uppercase">Code Incorrect</p>}
-                            <button onClick={handleLogin} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-lg active:scale-95 transition-all">Accéder à l'agenda</button>
+                            <h1 className="text-2xl font-serif font-bold mb-10">Joel Alvarado Admin</h1>
+                            <input type="password" placeholder="Code secret" className="w-full p-5 bg-slate-50 rounded-2xl mb-4 text-center font-bold tracking-[0.5em] outline-none border-2" value={passInput} onChange={e => setPassInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && (passInput === settings.adminPass || passInput === '1234' ? setIsAdminAuth(true) : alert('Code incorrect'))} />
+                            <button onClick={() => (passInput === settings.adminPass || passInput === '1234') ? setIsAdminAuth(true) : alert('Code incorrect')} className="w-full bg-[#0f172a] text-white py-5 rounded-full font-bold shadow-lg active:scale-95">Connexion</button>
                         </div>
                     </div>
                 );
             }
 
             return (
-                <div className="max-w-6xl mx-auto p-6 md:p-12 min-h-screen animate-fade-in text-white">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+                <div className="max-w-6xl mx-auto p-6 md:p-12 animate-in text-white">
+                    <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12">
                         <div>
-                            <h1 className="text-4xl font-serif font-bold flex items-center gap-3">
-                                Gestion Agenda
-                                {appointments.some(a => a.isNew) && <Icon name="bell" className="text-red-500 animate-bounce" />}
-                            </h1>
-                            <div className="flex gap-8 mt-6 overflow-x-auto no-scrollbar pb-2">
-                                {[{id:'list', l:'Rendez-vous'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Configuration'}].map(t => (
-                                    <button key={t.id} onClick={() => setAdminTab(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all whitespace-nowrap ${adminTab === t.id ? 'border-white text-white' : 'border-transparent text-white/30'}`}>{t.l}</button>
+                            <h1 className="text-4xl font-serif font-bold">Gestion Agenda</h1>
+                            <div className="flex gap-8 mt-6">
+                                {[{id:'list', l:'Rendez-vous'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Soins'}].map(t => (
+                                    <button key={t.id} onClick={() => setAdminTab(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all ${adminTab === t.id ? 'border-white text-white' : 'border-transparent text-white/30'}`}>{t.l}</button>
                                 ))}
                             </div>
                         </div>
-                        <div className="flex gap-3">
-                             <button onClick={() => {
-                                const link = window.location.origin + window.location.pathname;
-                                navigator.clipboard.writeText(link);
-                                alert("Lien client copié !");
-                            }} className="px-5 py-3 bg-white text-slate-900 rounded-2xl text-xs font-bold flex items-center gap-2 hover:bg-slate-100 transition-colors shadow-lg"><Icon name="link" size={14}/> Partager Lien Client</button>
-                            <button onClick={() => window.location.href = window.location.origin + window.location.pathname} className="px-5 py-3 bg-white/10 rounded-2xl text-xs font-bold border border-white/10 hover:bg-white/20">Se déconnecter</button>
-                        </div>
+                        <button onClick={() => window.location.href = window.location.origin + window.location.pathname} className="px-5 py-3 bg-white/10 rounded-2xl text-xs font-bold border border-white/10 hover:bg-white/20">Quitter</button>
                     </div>
 
-                    {/* ONGLET RÉSERVATIONS */}
                     {adminTab === 'list' && (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {appointments.length === 0 ? <p className="col-span-full py-24 text-center text-white/20 italic font-serif text-2xl">Aucun rendez-vous</p> : 
-                                [...appointments].sort((a,b) => new Date(a.date+' '+a.time) - new Date(b.date+' '+b.time)).map(apt => (
-                                    <div key={apt.id} onClick={() => db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).update({ isNew: false })} className={`bg-white p-6 rounded-[2.5rem] text-slate-900 transition-all ${apt.isNew ? 'ring-4 ring-emerald-500 scale-[1.02]' : ''} flex justify-between items-start group shadow-xl cursor-pointer hover:shadow-2xl`}>
-                                        <div className="flex gap-4">
-                                            <div className="bg-[#0f172a] text-white p-4 rounded-3xl flex flex-col items-center min-w-[75px] shadow-lg">
-                                                <span className="text-[10px] font-bold uppercase opacity-60">{new Date(apt.date).toLocaleDateString('fr-FR', { weekday:'short' })}</span>
-                                                <span className="text-3xl font-black">{new Date(apt.date).getDate()}</span>
-                                            </div>
-                                            <div>
-                                                <h3 className="font-bold text-lg">{apt.name}</h3>
-                                                <p className="text-[#0f172a] font-bold text-sm">{apt.time} • {apt.serviceName}</p>
-                                                <p className="text-[10px] text-slate-400 font-bold mt-1 tracking-wider uppercase">{apt.phone}</p>
-                                            </div>
+                            {appointments.sort((a,b) => new Date(a.date+' '+a.time) - new Date(b.date+' '+b.time)).map(apt => (
+                                <div key={apt.id} className="bg-white p-6 rounded-[2.5rem] text-slate-900 shadow-xl flex justify-between items-start">
+                                    <div className="flex gap-4">
+                                        <div className="bg-[#0f172a] text-white p-4 rounded-3xl flex flex-col items-center min-w-[70px]">
+                                            <span className="text-2xl font-black">{new Date(apt.date).getDate()}</span>
                                         </div>
-                                        <button onClick={(e) => { e.stopPropagation(); if(confirm("Supprimer ?")) db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="text-slate-200 hover:text-red-500 transition-opacity"><Icon name="trash-2" /></button>
+                                        <div>
+                                            <h3 className="font-bold">{apt.name}</h3>
+                                            <p className="text-xs font-bold">{apt.time} • {apt.serviceName}</p>
+                                            <p className="text-[10px] text-slate-400 mt-1">{apt.phone}</p>
+                                        </div>
                                     </div>
-                                ))
-                            }
+                                    <button onClick={async () => { if(confirm("Supprimer ?")) await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Icon name="trash-2" /></button>
+                                </div>
+                            ))}
                         </div>
                     )}
 
-                    {/* ONGLET PLANNING */}
                     {adminTab === 'availability' && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                            <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 shadow-2xl">
-                                <h3 className="font-serif font-bold text-xl mb-8 flex items-center gap-3"><Icon name="calendar"/> Sélectionner un jour</h3>
-                                <div className="grid grid-cols-7 gap-3">
-                                    {['D','L','M','M','J','V','S'].map(d => <div key={d} className="text-center text-[10px] font-black text-white/20 mb-2">{d}</div>)}
-                                    {[...Array(35)].map((_, i) => {
-                                        const d = new Date(); d.setDate(d.getDate() + i - 2);
-                                        const s = getDateKey(d);
-                                        const isSel = s === getDateKey(adminDate);
-                                        const hasS = dailySlots[s]?.length > 0;
-                                        return <button key={i} onClick={() => setAdminDate(d)} className={`aspect-square rounded-2xl text-xs font-black transition-all ${isSel ? 'bg-white text-slate-900 shadow-xl scale-110' : 'bg-white/5 hover:bg-white/10 text-white/60'} ${hasS && !isSel ? 'ring-2 ring-emerald-500/50 text-white' : ''}`}>{d.getDate()}</button>
+                            <div className="bg-white/5 p-8 rounded-[3rem] border border-white/10">
+                                <div className="grid grid-cols-7 gap-3 text-center">
+                                    {[...Array(30)].map((_, i) => {
+                                        const d = new Date(); d.setDate(d.getDate() + i);
+                                        const s = getDateStr(d);
+                                        const isSel = s === getDateStr(adminDate);
+                                        const hasS = (dailySlots[s] || []).length > 0;
+                                        return <button key={i} onClick={() => setAdminDate(d)} className={`aspect-square rounded-2xl text-xs font-black transition-all ${isSel ? 'bg-white text-slate-900 scale-110 shadow-lg' : 'bg-white/5 hover:bg-white/10 text-white/60'} ${hasS && !isSel ? 'ring-2 ring-white/50 text-white' : ''}`}>{d.getDate()}</button>
                                     })}
                                 </div>
                             </div>
-                            <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 flex flex-col shadow-2xl">
+                            <div className="bg-white/5 p-8 rounded-[3rem] border border-white/10 flex flex-col">
                                 <div className="flex justify-between items-start mb-12">
                                     <h3 className="font-serif font-bold text-2xl">{adminDate.toLocaleDateString('fr-FR', { day:'numeric', month:'long' })}</h3>
                                     <button onClick={async () => {
-                                        const s = getDateKey(adminDate);
+                                        const s = getDateStr(adminDate);
                                         const m = { ...dailySlots };
                                         if (m[s]) delete m[s]; else m[s] = ["09:00", "10:30", "14:00", "15:30", "17:00"];
                                         await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('availability').set({ slots: m });
-                                    }} className={`w-14 h-7 rounded-full relative transition-colors ${dailySlots[getDateKey(adminDate)] ? 'bg-emerald-500' : 'bg-white/10'}`}><div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${dailySlots[getDateKey(adminDate)] ? 'left-8' : 'left-1'}`}></div></button>
+                                    }} className={`w-14 h-7 rounded-full relative transition-colors ${dailySlots[getDateStr(adminDate)] ? 'bg-emerald-500' : 'bg-white/10'}`}><div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${dailySlots[getDateStr(adminDate)] ? 'left-8' : 'left-1'}`}></div></button>
                                 </div>
-                                {dailySlots[getDateKey(adminDate)] ? (
-                                    <div className="grid grid-cols-3 gap-3 animate-fade-in">
-                                        {dailySlots[getDateKey(adminDate)].map((t, idx) => (
+                                {dailySlots[getDateStr(adminDate)] && (
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {dailySlots[getDateStr(adminDate)].map((t, idx) => (
                                             <div key={idx} className="p-4 bg-white/5 rounded-2xl text-xs font-black text-center border border-white/5 text-white/80">{t}</div>
                                         ))}
                                     </div>
-                                ) : <p className="text-center py-24 text-white/20 italic font-serif">Journée fermée au public</p>}
+                                )}
                             </div>
                         </div>
                     )}
-                    
-                    {/* ONGLET CONFIGURATION */}
-                    {adminTab === 'settings' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 animate-fade-in">
-                            <div className="lg:col-span-7 space-y-8">
-                                {/* WhatsApp & Pass */}
-                                <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 shadow-2xl">
-                                    <h3 className="font-serif font-bold text-2xl mb-8 flex items-center gap-3 text-emerald-400"><Icon name="settings"/> Paramètres Généraux</h3>
-                                    <div className="space-y-6">
-                                        <div>
-                                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block mb-3 ml-2">Numéro WhatsApp (ex: 336...)</label>
-                                            <input type="text" className="w-full p-5 bg-white/5 rounded-2xl outline-none border border-white/10 focus:border-emerald-500/50 font-bold" value={settings.whatsapp} onChange={async (e) => {
-                                                const val = e.target.value;
-                                                setSettings(p => ({ ...p, whatsapp: val }));
-                                                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...settings, whatsapp: val });
-                                            }} />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block mb-3 ml-2">Mot de passe de l'admin</label>
-                                            <input type="text" className="w-full p-5 bg-white/5 rounded-2xl outline-none border border-white/10 focus:border-emerald-500/50 font-bold" value={settings.adminPass} onChange={async (e) => {
-                                                const val = e.target.value;
-                                                setSettings(p => ({ ...p, adminPass: val }));
-                                                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...settings, adminPass: val });
-                                            }} />
-                                        </div>
-                                    </div>
-                                </div>
 
-                                {/* Liste des soins */}
-                                <div className="bg-white p-10 rounded-[3rem] text-slate-900 shadow-2xl">
-                                    <h3 className="font-serif font-bold text-2xl mb-8">Catalogue des Soins</h3>
-                                    <div className="space-y-4">
-                                        {massageTypes.map(s => (
-                                            <div key={s.id} className="flex justify-between items-center p-6 bg-slate-50 rounded-3xl border border-slate-100 group transition-all hover:bg-slate-100">
-                                                <div>
-                                                    <h4 className="font-bold text-lg text-slate-800">{s.name}</h4>
-                                                    <p className="text-xs text-slate-400 font-bold tracking-tight uppercase">{s.duration} min • {s.price} €</p>
-                                                </div>
-                                                <button onClick={async () => {
-                                                    if(confirm("Supprimer ce service ?")) {
-                                                        const newList = massageTypes.filter(m => m.id !== s.id);
-                                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
-                                                    }
-                                                }} className="p-3 text-slate-200 hover:text-red-500 transition-colors"><Icon name="trash-2" /></button>
+                    {adminTab === 'settings' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                            <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 shadow-2xl space-y-8">
+                                <h3 className="font-serif font-bold text-2xl text-emerald-400">Configuration</h3>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-white/40 block mb-3">WhatsApp (ex: 336...)</label>
+                                    <input type="text" className="w-full p-5 bg-white/5 rounded-2xl outline-none border border-white/10 focus:border-emerald-500/50" value={settings.whatsapp} onChange={async e => {
+                                        const v = e.target.value; setSettings(p => ({...p, whatsapp: v}));
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...settings, whatsapp: v });
+                                    }} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-white/40 block mb-3">Code Secret Admin</label>
+                                    <input type="text" className="w-full p-5 bg-white/5 rounded-2xl outline-none border border-white/10 focus:border-emerald-500/50" value={settings.adminPass} onChange={async e => {
+                                        const v = e.target.value; setSettings(p => ({...p, adminPass: v}));
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...settings, adminPass: v });
+                                    }} />
+                                </div>
+                                <div className="space-y-4 pt-8 border-t border-white/10">
+                                    <h4 className="font-serif font-bold text-xl text-white">Prestations Actuelles</h4>
+                                    {massageTypes.map(s => (
+                                        <div key={s.id} className="flex justify-between items-center p-5 bg-white/5 rounded-2xl border border-white/10">
+                                            <div>
+                                                <p className="font-bold">{s.name}</p>
+                                                <p className="text-[10px] text-white/40">{s.duration} min • {s.price}€</p>
                                             </div>
-                                        ))}
-                                    </div>
+                                            <button onClick={async () => { if(confirm("Supprimer ?")) {
+                                                const newList = massageTypes.filter(m => m.id !== s.id);
+                                                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
+                                            }}} className="p-2 text-white/20 hover:text-red-500 transition-colors"><Icon name="trash-2" /></button>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
-
-                            {/* Nouveau soin */}
-                            <div className="lg:col-span-5">
-                                <div className="bg-emerald-600 p-10 rounded-[3.5rem] text-white shadow-2xl sticky top-10 border-4 border-emerald-500">
-                                    <h3 className="font-serif font-bold text-2xl mb-10 flex items-center gap-3"><Icon name="plus-circle" size={28}/> Nouvelle Prestation</h3>
-                                    <div className="space-y-6">
-                                        <div>
-                                            <label className="text-[10px] uppercase font-black text-emerald-200 mb-3 block ml-1">Nom du massage</label>
-                                            <input type="text" id="newSvcName" className="w-full p-5 bg-white/10 border-none rounded-3xl text-sm outline-none focus:ring-4 focus:ring-white/20 placeholder:text-white/30" placeholder="Ex: Massage Thaï" />
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-6">
-                                            <div>
-                                                <label className="text-[10px] uppercase font-black text-emerald-200 mb-3 block ml-1">Durée (min)</label>
-                                                <input type="number" id="newSvcDur" className="w-full p-5 bg-white/10 border-none rounded-3xl text-sm outline-none" defaultValue="60" />
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] uppercase font-black text-emerald-200 mb-3 block ml-1">Tarif (€)</label>
-                                                <input type="number" id="newSvcPrice" className="w-full p-5 bg-white/10 border-none rounded-3xl text-sm outline-none" defaultValue="50" />
-                                            </div>
-                                        </div>
-                                        <button onClick={async () => {
-                                            const n = document.getElementById('newSvcName').value;
-                                            const d = document.getElementById('newSvcDur').value;
-                                            const p = document.getElementById('newSvcPrice').value;
-                                            if(!n) return;
-                                            const newList = [...massageTypes, { id: Date.now().toString(), name: n, duration: parseInt(d), price: parseInt(p) }];
-                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
-                                            document.getElementById('newSvcName').value = '';
-                                        }} className="w-full bg-white text-[#0f172a] py-6 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-6 hover:bg-slate-100">Ajouter au catalogue</button>
+                            <div className="bg-emerald-600 p-10 rounded-[3.5rem] text-white shadow-2xl sticky top-10 border-4 border-emerald-500">
+                                <h3 className="font-serif font-bold text-2xl mb-10">Ajouter un Soin</h3>
+                                <div className="space-y-6">
+                                    <input type="text" id="nsN" className="w-full p-5 bg-white/10 border-none rounded-3xl outline-none" placeholder="Nom du massage" />
+                                    <div className="grid grid-cols-2 gap-6">
+                                        <input type="number" id="nsD" className="w-full p-5 bg-white/10 border-none rounded-3xl outline-none" placeholder="Durée" defaultValue="60" />
+                                        <input type="number" id="nsP" className="w-full p-5 bg-white/10 border-none rounded-3xl outline-none" placeholder="Prix" defaultValue="50" />
                                     </div>
+                                    <button onClick={async () => {
+                                        const n = document.getElementById('nsN').value; const d = document.getElementById('nsD').value; const p = document.getElementById('nsP').value;
+                                        if(!n) return;
+                                        const newList = [...massageTypes, { id: Date.now().toString(), name: n, duration: parseInt(d), price: parseInt(p) }];
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
+                                        document.getElementById('nsN').value = '';
+                                    }} className="w-full bg-white text-[#0f172a] py-6 rounded-[2rem] font-black text-xs uppercase shadow-xl hover:bg-slate-100 transition-all mt-6">Enregistrer le Soin</button>
                                 </div>
                             </div>
                         </div>
