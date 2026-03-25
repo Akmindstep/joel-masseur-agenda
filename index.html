@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZenFlow Massage - Réservation</title>
+    <title>Joel Alvarado - Masseur | Réservation</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel -->
@@ -20,13 +20,16 @@
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;600;800&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; } /* Bleu marine en fond */
         .font-serif { font-family: 'Playfair Display', serif; }
+        .bg-navy { background-color: #0f172a; } 
+        .text-navy { color: #0f172a; }
+        .border-navy { border-color: #0f172a; }
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
-<body class="bg-slate-50">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -45,17 +48,20 @@
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
-        const appId = "massage-booking-zenflow-sync";
+        const appId = "joel-alvarado-agenda";
 
+        // Composant Icône sécurisé
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+            useEffect(() => { 
+                if (window.lucide) window.lucide.createIcons(); 
+            }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`}></i>;
         };
 
         const DEFAULT_MASSAGES = [
-            { id: 'relax', name: 'Massage Relaxant', duration: 60, price: 70 },
-            { id: 'deep', name: 'Deep Tissue', duration: 60, price: 85 },
-            { id: 'sport', name: 'Massage Sportif', duration: 45, price: 65 },
+            { id: '1', name: 'Massage Relaxant', duration: 60, price: 70 },
+            { id: '2', name: 'Massage Deep Tissue', duration: 60, price: 85 },
+            { id: '3', name: 'Massage Sportif', duration: 45, price: 65 },
         ];
 
         const MONTHS_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -64,7 +70,8 @@
             const [user, setUser] = useState(null);
             const [view, setView] = useState('client'); 
             const [adminAuth, setAdminAuth] = useState(false);
-            const [password, setPassword] = useState('');
+            const [passwordInput, setPasswordInput] = useState('');
+            const [loginError, setLoginError] = useState(false);
             const [adminSubView, setAdminSubView] = useState('list');
             const [appointments, setAppointments] = useState([]);
             const [dailySlots, setDailySlots] = useState({}); 
@@ -77,18 +84,12 @@
             const [selectedTime, setSelectedTime] = useState(null);
             const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
             const [loading, setLoading] = useState(false);
+            const [newService, setNewService] = useState({ name: '', duration: 60, price: 50 });
 
-            // Gestion de l'URL pour déterminer si on est en mode Admin
             useEffect(() => {
                 const urlParams = new URLSearchParams(window.location.search);
-                if (urlParams.get('admin') === 'true') {
-                    setView('admin');
-                } else {
-                    setView('client');
-                }
-            }, []);
-
-            useEffect(() => {
+                if (urlParams.get('admin') === 'true') setView('admin');
+                
                 auth.signInAnonymously().catch(console.error);
                 auth.onAuthStateChanged(setUser);
             }, []);
@@ -96,31 +97,30 @@
             useEffect(() => {
                 if (!user) return;
                 
-                const aptsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments');
-                const unsubApts = aptsRef.onSnapshot((snap) => {
+                const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
+                
+                const unsubApts = baseRef.collection('appointments').onSnapshot((snap) => {
                     setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                 });
 
-                const availDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('availability');
-                const unsubAvail = availDoc.onSnapshot((snap) => {
+                const unsubAvail = baseRef.collection('settings').doc('availability').onSnapshot((snap) => {
                     if (snap.exists) setDailySlots(snap.data().slots || {});
                 });
 
-                const settingsDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config');
-                const unsubSettings = settingsDoc.onSnapshot((snap) => {
-                    if (snap.exists) setBusinessSettings(snap.data());
+                const unsubSettings = baseRef.collection('settings').doc('config').onSnapshot((snap) => {
+                    if (snap.exists) setBusinessSettings(prev => ({ ...prev, ...snap.data() }));
                 });
 
-                const servicesDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services');
-                const unsubServices = servicesDoc.onSnapshot((snap) => {
+                const unsubServices = baseRef.collection('settings').doc('services').onSnapshot((snap) => {
                     if (snap.exists) setMassageTypes(snap.data().list || DEFAULT_MASSAGES);
-                    else setMassageTypes(DEFAULT_MASSAGES);
+                    else {
+                        baseRef.collection('settings').doc('services').set({ list: DEFAULT_MASSAGES });
+                        setMassageTypes(DEFAULT_MASSAGES);
+                    }
                 });
 
                 return () => { unsubApts(); unsubAvail(); unsubSettings(); unsubServices(); };
             }, [user]);
-
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
             const getDateStr = (d) => d.toISOString().split('T')[0];
 
@@ -148,54 +148,62 @@
                 setLoading(false);
             };
 
-            const copyClientLink = () => {
-                const link = window.location.origin + window.location.pathname;
-                navigator.clipboard.writeText(link);
-                alert("Lien client copié ! Envoyez ce lien à vos clients.");
+            const handleAdminLogin = () => {
+                // Conversion en string pour assurer la comparaison même si le stockage est numérique
+                const storedPass = String(businessSettings.adminPass || "1234");
+                const enteredPass = String(passwordInput);
+
+                if (enteredPass === storedPass || enteredPass === "1234") {
+                    setAdminAuth(true);
+                    setLoginError(false);
+                } else {
+                    setLoginError(true);
+                    setTimeout(() => setLoginError(false), 2000);
+                }
             };
 
             // --- VUE CLIENT ---
             if (view === 'client') {
                 return (
-                    <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col border-x border-slate-100 animate-fade-in">
-                        <div className="bg-emerald-800 p-8 text-white text-center shadow-lg">
-                            <h1 className="text-3xl font-serif font-bold tracking-tight mb-1">ZenFlow</h1>
-                            <p className="text-emerald-100/80 text-[10px] font-bold uppercase tracking-[0.2em]">Massage & Sérénité</p>
+                    <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col border-x border-slate-800 animate-fade-in">
+                        <div className="bg-navy p-10 text-white text-center shadow-lg">
+                            <h1 className="text-3xl font-serif font-bold tracking-tight mb-1">Joel Alvarado</h1>
+                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em]">Masseur Professionnel</p>
                         </div>
 
                         <div className="p-6 flex-grow overflow-y-auto">
                             {step === 1 && (
-                                <div className="space-y-4">
+                                <div className="space-y-4 animate-fade-in">
                                     <h2 className="text-xl font-semibold text-slate-800 mb-8 text-center font-serif">Quel soin désirez-vous ?</h2>
                                     {massageTypes.map(s => (
-                                        <button key={s.id} onClick={() => { setSelectedService(s); setStep(2); }} className="w-full text-left p-5 bg-white border border-slate-100 rounded-3xl hover:border-emerald-200 transition-all flex justify-between items-center group shadow-sm active:scale-95">
+                                        <button key={s.id} onClick={() => { setSelectedService(s); setStep(2); }} className="w-full text-left p-6 bg-white border border-slate-100 rounded-3xl hover:border-navy transition-all flex justify-between items-center group shadow-sm active:scale-95">
                                             <div>
-                                                <h3 className="font-bold text-slate-800 text-lg">{s.name}</h3>
+                                                <h3 className="font-bold text-slate-800 text-lg group-hover:text-navy">{s.name}</h3>
                                                 <p className="text-xs text-slate-400 font-bold">{s.duration} min • {s.price}€</p>
                                             </div>
-                                            <Icon name="chevron-right" size={24} className="text-slate-200 group-hover:text-emerald-600" />
+                                            <Icon name="chevron-right" size={24} className="text-slate-200 group-hover:text-navy" />
                                         </button>
                                     ))}
                                 </div>
                             )}
 
                             {step === 2 && (
-                                <div className="space-y-6">
-                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
-                                    <div className="bg-slate-50 p-5 rounded-[2.5rem] border border-slate-100">
-                                        <div className="flex justify-between items-center mb-6 text-[10px] font-black uppercase text-slate-400">
+                                <div className="space-y-6 animate-fade-in">
+                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-slate-500 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
+                                    <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100">
+                                        <div className="flex justify-between items-center mb-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">
                                             <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(d); }}><Icon name="chevron-left"/></button>
                                             <span>{MONTHS_FR[selectedDate.getMonth()]} {selectedDate.getFullYear()}</span>
                                             <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 7); setSelectedDate(d); }}><Icon name="chevron-right"/></button>
                                         </div>
-                                        <div className="grid grid-cols-7 gap-1">
+                                        <div className="grid grid-cols-7 gap-2">
                                             {[...Array(7)].map((_, i) => {
                                                 const d = new Date(selectedDate); d.setDate(selectedDate.getDate() - selectedDate.getDay() + i);
                                                 const isSel = d.toDateString() === selectedDate.toDateString();
                                                 const hasS = getAvailableSlots(d).length > 0;
                                                 const isPast = d < new Date(new Date().setHours(0,0,0,0));
                                                 return (
-                                                    <button key={i} disabled={isPast || !hasS} onClick={() => setSelectedDate(d)} className={`aspect-square flex flex-col items-center justify-center rounded-2xl text-xs transition-all ${isSel ? 'bg-emerald-600 text-white shadow-lg' : 'hover:bg-emerald-50'} ${(!hasS || isPast) ? 'opacity-10 cursor-not-allowed' : 'font-black text-slate-700'}`}>
+                                                    <button key={i} disabled={isPast || !hasS} onClick={() => setSelectedDate(d)} className={`aspect-square flex flex-col items-center justify-center rounded-2xl text-xs transition-all ${isSel ? 'bg-navy text-white shadow-lg' : 'hover:bg-slate-200'} ${(!hasS || isPast) ? 'opacity-10 cursor-not-allowed' : 'font-black text-slate-700'}`}>
                                                         {d.getDate()}
                                                     </button>
                                                 );
@@ -204,40 +212,40 @@
                                     </div>
                                     <div className="grid grid-cols-3 gap-2 py-4">
                                         {getAvailableSlots(selectedDate).map((time, idx) => (
-                                            <button key={idx} onClick={() => setSelectedTime(time)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === time ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-white text-slate-500'}`}>{time}</button>
+                                            <button key={idx} onClick={() => setSelectedTime(time)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === time ? 'bg-navy border-navy text-white shadow-md' : 'bg-white text-slate-500'}`}>{time}</button>
                                         ))}
                                     </div>
-                                    {selectedTime && <button onClick={() => setStep(3)} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">Suivant</button>}
+                                    {selectedTime && <button onClick={() => setStep(3)} className="w-full bg-navy text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">Suivant</button>}
                                 </div>
                             )}
 
                             {step === 3 && (
-                                <div className="space-y-6">
-                                    <button onClick={() => setStep(2)} className="text-xs font-bold text-emerald-700 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
+                                <div className="space-y-6 animate-fade-in">
+                                    <button onClick={() => setStep(2)} className="text-xs font-bold text-slate-500 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
                                     <div className="space-y-4">
-                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Nom complet" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-                                        <textarea className="w-full p-5 bg-slate-50 rounded-[1.5rem] min-h-[100px] text-sm outline-none" placeholder="Notes (facultatif)" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none border border-transparent focus:border-slate-200" placeholder="Votre nom" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none border border-transparent focus:border-slate-200" placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                                        <textarea className="w-full p-5 bg-slate-50 rounded-[1.5rem] min-h-[100px] text-sm outline-none border border-transparent focus:border-slate-200" placeholder="Notes (facultatif)" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                                     </div>
-                                    <button disabled={!formData.name || !formData.phone || loading} onClick={handleBooking} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">
-                                        {loading ? "Chargement..." : "Confirmer le rendez-vous"}
+                                    <button disabled={!formData.name || !formData.phone || loading} onClick={handleBooking} className="w-full bg-navy text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">
+                                        {loading ? "Chargement..." : "Confirmer la séance"}
                                     </button>
                                 </div>
                             )}
 
                             {step === 4 && (
-                                <div className="text-center py-12 space-y-8">
-                                    <Icon name="check-circle" size={64} className="text-emerald-600 mx-auto" />
+                                <div className="text-center py-12 space-y-8 animate-fade-in">
+                                    <Icon name="check-circle" size={64} className="text-emerald-500 mx-auto" />
                                     <h2 className="text-3xl font-serif font-bold text-slate-800">Réservé !</h2>
-                                    <p className="text-slate-500 text-sm">Veuillez envoyer la confirmation par WhatsApp pour finaliser.</p>
+                                    <p className="text-slate-500 text-sm">Veuillez envoyer la confirmation par WhatsApp pour que je puisse valider votre séance.</p>
                                     <button onClick={() => {
                                         const phone = businessSettings.whatsapp || "33600000000";
-                                        const text = `Bonjour ! RDV massage réservé 💆‍♂️%0A*Client:* ${formData.name}%0A*Soin:* ${selectedService.name}%0A*Heure:* ${selectedTime}`;
+                                        const text = `Bonjour Joel ! RDV massage réservé 💆‍♂️%0A*Client:* ${formData.name}%0A*Soin:* ${selectedService.name}%0A*Heure:* ${selectedTime}`;
                                         window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
                                     }} className="w-full bg-[#25D366] text-white py-5 rounded-[2rem] font-black text-xs uppercase flex items-center justify-center gap-3 shadow-xl active:scale-95">
                                         <Icon name="message-square" /> Envoyer sur WhatsApp
                                     </button>
-                                    <button onClick={() => setStep(1)} className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Retour à l'accueil</button>
+                                    <button onClick={() => setStep(1)} className="text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-navy">Retour à l'accueil</button>
                                 </div>
                             )}
                         </div>
@@ -248,57 +256,69 @@
             // --- VUE ADMIN ---
             if (!adminAuth) {
                 return (
-                    <div className="flex items-center justify-center min-h-screen bg-slate-900 p-6 animate-fade-in">
-                        <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md text-center">
-                            <Icon name="lock" size={48} className="text-emerald-600 mx-auto mb-6" />
-                            <h1 className="text-2xl font-serif font-bold mb-2">Accès Sécurisé</h1>
-                            <p className="text-slate-400 text-sm mb-8">Veuillez entrer votre code d'accès personnel.</p>
-                            <input type="password" placeholder="Code secret" className="w-full p-4 bg-slate-50 rounded-2xl mb-4 text-center font-bold tracking-widest outline-none focus:ring-2 focus:ring-emerald-500/20" value={password} onChange={e => setPassword(e.target.value)} />
-                            <button onClick={() => {
-                                if (password === businessSettings.adminPass || password === "1234") setAdminAuth(true);
-                                else alert("Code incorrect");
-                            }} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg">Se connecter</button>
+                    <div className="flex items-center justify-center min-h-screen bg-navy p-6">
+                        <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md text-center animate-fade-in">
+                            <Icon name="lock" size={48} className="text-navy mx-auto mb-6" />
+                            <h1 className="text-2xl font-serif font-bold mb-2">Joel Alvarado</h1>
+                            <p className="text-slate-400 text-sm mb-8">Accès Gestionnaire</p>
+                            <input 
+                                type="password" 
+                                placeholder="Code secret" 
+                                className={`w-full p-4 bg-slate-50 rounded-2xl mb-4 text-center font-bold tracking-widest outline-none border transition-colors ${loginError ? 'border-red-500 bg-red-50' : 'focus:border-navy'}`} 
+                                value={passwordInput} 
+                                onChange={e => setPasswordInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                            />
+                            {loginError && <p className="text-red-500 text-[10px] font-bold mb-4">CODE INCORRECT</p>}
+                            <button onClick={handleAdminLogin} className="w-full bg-navy text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-transform">Connexion</button>
                         </div>
                     </div>
                 );
             }
 
             return (
-                <div className="max-w-6xl mx-auto p-6 md:p-10 min-h-screen animate-fade-in">
+                <div className="max-w-6xl mx-auto p-6 md:p-10 min-h-screen bg-white md:bg-transparent rounded-none md:rounded-none animate-fade-in">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-                        <div>
-                            <h1 className="text-4xl font-serif font-bold text-gray-900 flex items-center gap-3">
-                                Admin ZenFlow 
+                        <div className="bg-white/10 backdrop-blur-md p-4 rounded-3xl md:bg-transparent">
+                            <h1 className="text-4xl font-serif font-bold text-white md:text-gray-900 flex items-center gap-3">
+                                Gestion Agenda
                                 {appointments.some(a => a.isNew) && <Icon name="bell" className="text-red-500 animate-bounce" />}
                             </h1>
-                            <div className="flex gap-8 mt-6">
-                                {[{id:'list', l:'Agenda'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Réglages'}].map(t => (
-                                    <button key={t.id} onClick={() => setAdminSubView(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all ${adminSubView === t.id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-400'}`}>{t.l}</button>
+                            <div className="flex gap-8 mt-6 overflow-x-auto pb-2 no-scrollbar">
+                                {[{id:'list', l:'Rendez-vous'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Configuration'}].map(t => (
+                                    <button key={t.id} onClick={() => setAdminSubView(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all whitespace-nowrap ${adminSubView === t.id ? 'border-white md:border-navy text-white md:text-navy' : 'border-transparent text-white/50 md:text-slate-400'}`}>{t.l}</button>
                                 ))}
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            <button onClick={copyClientLink} className="px-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold flex items-center gap-2 hover:bg-slate-50"><Icon name="link" size={14}/> Copier lien client</button>
-                            <button onClick={() => window.location.href = window.location.origin + window.location.pathname} className="px-4 py-3 bg-emerald-50 text-emerald-700 rounded-2xl text-xs font-bold">Quitter Admin</button>
+                            <button onClick={() => {
+                                const link = window.location.origin + window.location.pathname;
+                                navigator.clipboard.writeText(link);
+                                alert("Lien client copié !");
+                            }} className="px-4 py-3 bg-white border rounded-2xl text-xs font-bold flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Icon name="link" size={14}/> Copier lien client</button>
+                            <button onClick={() => window.location.href = window.location.origin + window.location.pathname} className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl text-xs font-bold">Déconnexion</button>
                         </div>
                     </div>
 
                     {adminSubView === 'list' && (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {appointments.length === 0 ? <p className="col-span-full text-center py-20 text-slate-300 italic">Aucun rendez-vous.</p> : 
+                            {appointments.length === 0 ? <p className="col-span-full text-center py-20 text-white md:text-slate-300 italic font-serif">Aucun rendez-vous pour le moment.</p> : 
                                 [...appointments].sort((a,b) => new Date(a.date+' '+a.time) - new Date(b.date+' '+b.time)).map(apt => (
-                                    <div key={apt.id} className={`bg-white p-6 rounded-[2rem] border ${apt.isNew ? 'border-emerald-400 bg-emerald-50/20' : 'border-slate-100'} flex justify-between items-start group shadow-sm transition-all relative`}>
+                                    <div key={apt.id} onClick={async () => {
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).update({ isNew: false });
+                                    }} className={`bg-white p-6 rounded-[2rem] border transition-all ${apt.isNew ? 'border-navy bg-indigo-50/20' : 'border-slate-100'} flex justify-between items-start group shadow-sm relative cursor-pointer hover:shadow-md`}>
                                         <div className="flex gap-4">
-                                            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-2xl flex flex-col items-center min-w-[70px]">
-                                                <span className="text-2xl font-black">{new Date(apt.date).getDate()}</span>
+                                            <div className="bg-slate-900 text-white p-3 rounded-2xl flex flex-col items-center min-w-[70px]">
+                                                <span className="text-[10px] uppercase font-bold">{new Date(apt.date).toLocaleDateString('fr-FR', { weekday:'short' })}</span>
+                                                <span className="text-2xl font-black leading-none">{new Date(apt.date).getDate()}</span>
                                             </div>
                                             <div>
                                                 <h3 className="font-bold text-slate-800">{apt.name}</h3>
-                                                <p className="text-emerald-600 font-bold text-xs">{apt.time} • {apt.serviceName}</p>
-                                                <p className="text-[10px] text-slate-400">{apt.phone}</p>
+                                                <p className="text-navy font-bold text-xs">{apt.time} • {apt.serviceName}</p>
+                                                <p className="text-[10px] text-slate-400 mt-1">{apt.phone}</p>
                                             </div>
                                         </div>
-                                        <button onClick={() => { if(confirm("Supprimer ?")) db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); if(confirm("Supprimer ?")) db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" /></button>
                                     </div>
                                 ))
                             }
@@ -306,20 +326,20 @@
                     )}
 
                     {adminSubView === 'availability' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 text-center">
-                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                                <h3 className="font-serif font-bold text-lg mb-6">Gestion du Planning</h3>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                                <h3 className="font-serif font-bold text-lg mb-6 flex items-center gap-2"><Icon name="calendar" className="text-navy"/> Gérer les dates</h3>
                                 <div className="grid grid-cols-7 gap-3">
-                                    {[...Array(30)].map((_, i) => {
-                                        const d = new Date(); d.setDate(d.getDate() + i);
+                                    {[...Array(35)].map((_, i) => {
+                                        const d = new Date(); d.setDate(d.getDate() + i - 2);
                                         const s = getDateStr(d);
                                         const isSel = s === getDateStr(adminSelectedDate);
                                         const hasS = dailySlots[s]?.length > 0;
-                                        return <button key={i} onClick={() => setAdminSelectedDate(d)} className={`aspect-square rounded-xl text-xs font-bold transition-all ${isSel ? 'bg-emerald-600 text-white scale-110 shadow-lg' : 'bg-slate-50'} ${hasS && !isSel ? 'text-emerald-600 ring-2 ring-emerald-100' : 'text-slate-400'}`}>{d.getDate()}</button>
+                                        return <button key={i} onClick={() => setAdminSelectedDate(d)} className={`aspect-square rounded-xl text-xs font-bold transition-all ${isSel ? 'bg-navy text-white scale-110 shadow-lg' : 'bg-slate-50 hover:bg-slate-100'} ${hasS && !isSel ? 'text-navy ring-2 ring-indigo-100' : 'text-slate-400'}`}>{d.getDate()}</button>
                                     })}
                                 </div>
                             </div>
-                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
                                 <div className="flex justify-between items-start mb-10">
                                     <h3 className="font-serif font-bold text-xl">{adminSelectedDate.toLocaleDateString('fr-FR', { day:'numeric', month:'long' })}</h3>
                                     <button onClick={async () => {
@@ -327,37 +347,90 @@
                                         const m = { ...dailySlots };
                                         if (m[s]) delete m[s]; else m[s] = ["09:00", "10:30", "14:00", "15:30"];
                                         await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('availability').set({ slots: m });
-                                    }} className={`w-12 h-6 rounded-full relative transition-colors ${dailySlots[getDateStr(adminSelectedDate)] ? 'bg-emerald-500' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${dailySlots[getDateStr(adminSelectedDate)] ? 'left-7' : 'left-1'}`}></div></button>
+                                    }} className={`w-12 h-6 rounded-full relative transition-colors ${dailySlots[getDateStr(adminSelectedDate)] ? 'bg-indigo-600' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${dailySlots[getDateStr(adminSelectedDate)] ? 'left-7' : 'left-1'}`}></div></button>
                                 </div>
                                 {dailySlots[getDateStr(adminSelectedDate)] ? (
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {dailySlots[getDateStr(adminSelectedDate)].map((t, idx) => <div key={idx} className="p-4 bg-slate-50 rounded-2xl text-xs font-black text-slate-600 border border-slate-100">{t}</div>)}
+                                    <div className="grid grid-cols-3 gap-2 animate-fade-in">
+                                        {dailySlots[getDateStr(adminSelectedDate)].map((t, idx) => (
+                                            <div key={idx} className="p-4 bg-slate-50 rounded-2xl text-xs font-black text-center border border-slate-100 text-navy">{t}</div>
+                                        ))}
                                     </div>
-                                ) : <p className="text-slate-300 italic py-10">Aucun créneau ouvert</p>}
+                                ) : <p className="text-center py-10 text-slate-300 italic">Cliquez sur l'interrupteur pour ouvrir ce jour.</p>}
                             </div>
                         </div>
                     )}
                     
                     {adminSubView === 'settings' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                                <h3 className="font-serif font-bold text-xl mb-6">Configuration</h3>
-                                <div className="space-y-6">
-                                    <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Numéro WhatsApp</label>
-                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none" value={businessSettings.whatsapp} onChange={async e => {
-                                            const val = e.target.value;
-                                            setBusinessSettings(p => ({ ...p, whatsapp: val }));
-                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, whatsapp: val });
-                                        }} />
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-fade-in">
+                            <div className="lg:col-span-7 space-y-6">
+                                {/* Numéro WhatsApp */}
+                                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                                    <h3 className="font-serif font-bold text-xl mb-6 flex items-center gap-2 text-emerald-600"><Icon name="message-square" /> Contact WhatsApp</h3>
+                                    <input type="text" className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-lg outline-none focus:ring-2 focus:ring-navy/10" value={businessSettings.whatsapp} onChange={async (e) => {
+                                        const val = e.target.value;
+                                        setBusinessSettings(p => ({ ...p, whatsapp: val }));
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, whatsapp: val });
+                                    }} />
+                                    <p className="text-[10px] text-slate-400 mt-2">Ex: 33612345678 (sans le +)</p>
+                                </div>
+
+                                {/* Code secret */}
+                                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                                    <h3 className="font-serif font-bold text-xl mb-6 flex items-center gap-2 text-navy"><Icon name="lock" /> Code secret Admin</h3>
+                                    <input type="text" className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-lg outline-none focus:ring-2 focus:ring-navy/10" value={businessSettings.adminPass} onChange={async (e) => {
+                                        const val = e.target.value;
+                                        setBusinessSettings(p => ({ ...p, adminPass: val }));
+                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, adminPass: val });
+                                    }} />
+                                </div>
+
+                                {/* Liste des soins */}
+                                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                                    <h3 className="font-serif font-bold text-xl mb-6 flex items-center gap-2"><Icon name="list" className="text-navy"/> Prestations</h3>
+                                    <div className="space-y-4">
+                                        {massageTypes.map(s => (
+                                            <div key={s.id} className="flex justify-between items-center p-5 bg-slate-50 rounded-2xl border border-slate-100">
+                                                <div>
+                                                    <h4 className="font-bold text-navy">{s.name}</h4>
+                                                    <p className="text-xs text-slate-400 font-bold">{s.duration} min • {s.price} €</p>
+                                                </div>
+                                                <button onClick={async () => {
+                                                    if(confirm("Supprimer ce soin ?")) {
+                                                        const newList = massageTypes.filter(m => m.id !== s.id);
+                                                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
+                                                    }
+                                                }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Icon name="trash-2" /></button>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Code d'accès Admin</label>
-                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none" value={businessSettings.adminPass} onChange={async e => {
-                                            const val = e.target.value;
-                                            setBusinessSettings(p => ({ ...p, adminPass: val }));
-                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, adminPass: val });
-                                        }} />
+                                </div>
+                            </div>
+
+                            {/* Nouveau soin */}
+                            <div className="lg:col-span-5">
+                                <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl sticky top-10">
+                                    <h3 className="font-serif font-bold text-xl mb-8 flex items-center gap-2"><Icon name="plus-circle" className="text-indigo-400" /> Nouveau Soin</h3>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-black text-slate-400 mb-2 block">Nom du massage</label>
+                                            <input type="text" className="w-full p-4 bg-white/10 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-white/20" value={newService.name} onChange={e => setNewService({...newService, name: e.target.value})} placeholder="Ex: Massage Suédois" />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-[10px] uppercase font-black text-slate-400 mb-2 block">Durée (min)</label>
+                                                <input type="number" className="w-full p-4 bg-white/10 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-white/20" value={newService.duration} onChange={e => setNewService({...newService, duration: parseInt(e.target.value)})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-black text-slate-400 mb-2 block">Prix (€)</label>
+                                                <input type="number" className="w-full p-4 bg-white/10 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-white/20" value={newService.price} onChange={e => setNewService({...newService, price: parseInt(e.target.value)})} />
+                                            </div>
+                                        </div>
+                                        <button onClick={async () => {
+                                            if(!newService.name) return;
+                                            const newList = [...massageTypes, {...newService, id: Date.now().toString()}];
+                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services').set({ list: newList });
+                                            setNewService({name:'', duration:60, price:50});
+                                        }} className="w-full bg-white text-navy py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all mt-4 hover:bg-slate-100">Créer la prestation</button>
                                     </div>
                                 </div>
                             </div>
