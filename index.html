@@ -13,7 +13,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Firebase SDKs (Compat versions for easier global usage in single-file HTML) -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -42,17 +42,13 @@
             appId: "1:1076236018116:web:43bc905a807e0410528491"
         };
 
-        // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
         const appId = "massage-booking-zenflow-sync";
 
-        // Composant d'icônes Lucide
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => {
-                if (window.lucide) window.lucide.createIcons();
-            }, [name]);
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`}></i>;
         };
 
@@ -67,11 +63,13 @@
         function App() {
             const [user, setUser] = useState(null);
             const [view, setView] = useState('client'); 
+            const [adminAuth, setAdminAuth] = useState(false);
+            const [password, setPassword] = useState('');
             const [adminSubView, setAdminSubView] = useState('list');
             const [appointments, setAppointments] = useState([]);
             const [dailySlots, setDailySlots] = useState({}); 
             const [massageTypes, setMassageTypes] = useState([]);
-            const [businessSettings, setBusinessSettings] = useState({ whatsapp: "33600000000" });
+            const [businessSettings, setBusinessSettings] = useState({ whatsapp: "33600000000", adminPass: "1234" });
             
             const [step, setStep] = useState(1);
             const [selectedService, setSelectedService] = useState(null);
@@ -79,51 +77,50 @@
             const [selectedTime, setSelectedTime] = useState(null);
             const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
             const [loading, setLoading] = useState(false);
-            const [isSyncing, setIsSyncing] = useState(true);
 
-            // Authentification
+            // Gestion de l'URL pour déterminer si on est en mode Admin
             useEffect(() => {
-                auth.signInAnonymously().catch(err => console.error("Auth error:", err));
-                const unsubscribe = auth.onAuthStateChanged((u) => setUser(u));
-                return () => unsubscribe();
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('admin') === 'true') {
+                    setView('admin');
+                } else {
+                    setView('client');
+                }
             }, []);
 
-            // Synchronisation Firestore
+            useEffect(() => {
+                auth.signInAnonymously().catch(console.error);
+                auth.onAuthStateChanged(setUser);
+            }, []);
+
             useEffect(() => {
                 if (!user) return;
-                setIsSyncing(true);
-
-                // Rendez-vous (Public)
+                
                 const aptsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments');
                 const unsubApts = aptsRef.onSnapshot((snap) => {
                     setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                    setIsSyncing(false);
                 });
 
-                // Disponibilités
                 const availDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('availability');
                 const unsubAvail = availDoc.onSnapshot((snap) => {
                     if (snap.exists) setDailySlots(snap.data().slots || {});
                 });
 
-                // Configuration
                 const settingsDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config');
                 const unsubSettings = settingsDoc.onSnapshot((snap) => {
                     if (snap.exists) setBusinessSettings(snap.data());
                 });
 
-                // Services
                 const servicesDoc = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('services');
                 const unsubServices = servicesDoc.onSnapshot((snap) => {
                     if (snap.exists) setMassageTypes(snap.data().list || DEFAULT_MASSAGES);
-                    else {
-                        servicesDoc.set({ list: DEFAULT_MASSAGES });
-                        setMassageTypes(DEFAULT_MASSAGES);
-                    }
+                    else setMassageTypes(DEFAULT_MASSAGES);
                 });
 
                 return () => { unsubApts(); unsubAvail(); unsubSettings(); unsubServices(); };
             }, [user]);
+
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
             const getDateStr = (d) => d.toISOString().split('T')[0];
 
@@ -132,13 +129,6 @@
                 const slots = dailySlots[s] || [];
                 const booked = appointments.filter(a => String(a.date) === s).map(a => String(a.time));
                 return slots.filter(t => !booked.includes(t)).sort();
-            };
-
-            const openWhatsApp = (booking) => {
-                const phone = businessSettings.whatsapp || "33600000000";
-                const dateFmt = new Date(booking.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-                const text = `Bonjour ! Nouveau RDV massage 💆‍♂️%0A%0A*Client:* ${booking.name}%0A*Soin:* ${booking.serviceName}%0A*Date:* ${dateFmt}%0A*Heure:* ${booking.time}%0A*Tél:* ${booking.phone}`;
-                window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
             };
 
             const handleBooking = async () => {
@@ -150,23 +140,21 @@
                     serviceName: selectedService.name,
                     date: getDateStr(selectedDate),
                     time: selectedTime,
-                    createdAt: new Date().toISOString(),
-                    isNew: true
+                    isNew: true,
+                    createdAt: new Date().toISOString()
                 };
-                try {
-                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').add(booking);
-                    setStep(4);
-                } catch (e) {
-                    console.error("Booking error:", e);
-                } finally {
-                    setLoading(false);
-                }
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').add(booking);
+                setStep(4);
+                setLoading(false);
             };
 
-            const markRead = async (id) => {
-                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(id).update({ isNew: false });
+            const copyClientLink = () => {
+                const link = window.location.origin + window.location.pathname;
+                navigator.clipboard.writeText(link);
+                alert("Lien client copié ! Envoyez ce lien à vos clients.");
             };
 
+            // --- VUE CLIENT ---
             if (view === 'client') {
                 return (
                     <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col border-x border-slate-100 animate-fade-in">
@@ -193,7 +181,7 @@
 
                             {step === 2 && (
                                 <div className="space-y-6">
-                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour aux soins</button>
+                                    <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
                                     <div className="bg-slate-50 p-5 rounded-[2.5rem] border border-slate-100">
                                         <div className="flex justify-between items-center mb-6 text-[10px] font-black uppercase text-slate-400">
                                             <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(d); }}><Icon name="chevron-left"/></button>
@@ -216,7 +204,7 @@
                                     </div>
                                     <div className="grid grid-cols-3 gap-2 py-4">
                                         {getAvailableSlots(selectedDate).map((time, idx) => (
-                                            <button key={idx} onClick={() => setSelectedTime(time)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === time ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-white border-slate-50 text-slate-500'}`}>{time}</button>
+                                            <button key={idx} onClick={() => setSelectedTime(time)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === time ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-white text-slate-500'}`}>{time}</button>
                                         ))}
                                     </div>
                                     {selectedTime && <button onClick={() => setStep(3)} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">Suivant</button>}
@@ -227,11 +215,11 @@
                                 <div className="space-y-6">
                                     <button onClick={() => setStep(2)} className="text-xs font-bold text-emerald-700 flex items-center gap-1"><Icon name="chevron-left" size={16}/> Retour</button>
                                     <div className="space-y-4">
-                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Votre nom complet" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Téléphone (ex: 06...)" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-                                        <textarea className="w-full p-5 bg-slate-50 rounded-[1.5rem] min-h-[100px] text-sm outline-none" placeholder="Notes pour le praticien..." value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                                        <input type="text" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Nom complet" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                                        <input type="tel" className="w-full p-5 bg-slate-50 rounded-[1.5rem] text-sm outline-none" placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                                        <textarea className="w-full p-5 bg-slate-50 rounded-[1.5rem] min-h-[100px] text-sm outline-none" placeholder="Notes (facultatif)" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                                     </div>
-                                    <button disabled={!formData.name || !formData.phone || loading} onClick={handleBooking} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95 disabled:bg-slate-200 transition-colors">
+                                    <button disabled={!formData.name || !formData.phone || loading} onClick={handleBooking} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">
                                         {loading ? "Chargement..." : "Confirmer le rendez-vous"}
                                     </button>
                                 </div>
@@ -239,20 +227,37 @@
 
                             {step === 4 && (
                                 <div className="text-center py-12 space-y-8">
-                                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-600 shadow-inner">
-                                        <Icon name="check-circle" size={48} />
-                                    </div>
+                                    <Icon name="check-circle" size={64} className="text-emerald-600 mx-auto" />
                                     <h2 className="text-3xl font-serif font-bold text-slate-800">Réservé !</h2>
-                                    <p className="text-slate-500 text-sm">Veuillez envoyer la confirmation par WhatsApp pour finaliser le rendez-vous.</p>
-                                    <button onClick={() => openWhatsApp({ name: formData.name, serviceName: selectedService.name, time: selectedTime, date: selectedDate, phone: formData.phone })} className="w-full bg-[#25D366] text-white py-5 rounded-[2rem] font-black text-xs uppercase flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
+                                    <p className="text-slate-500 text-sm">Veuillez envoyer la confirmation par WhatsApp pour finaliser.</p>
+                                    <button onClick={() => {
+                                        const phone = businessSettings.whatsapp || "33600000000";
+                                        const text = `Bonjour ! RDV massage réservé 💆‍♂️%0A*Client:* ${formData.name}%0A*Soin:* ${selectedService.name}%0A*Heure:* ${selectedTime}`;
+                                        window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+                                    }} className="w-full bg-[#25D366] text-white py-5 rounded-[2rem] font-black text-xs uppercase flex items-center justify-center gap-3 shadow-xl active:scale-95">
                                         <Icon name="message-square" /> Envoyer sur WhatsApp
                                     </button>
-                                    <button onClick={() => setStep(1)} className="text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-emerald-700">Prendre un autre RDV</button>
+                                    <button onClick={() => setStep(1)} className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Retour à l'accueil</button>
                                 </div>
                             )}
                         </div>
-                        <div className="p-4 border-t bg-slate-50 text-center">
-                            <button onClick={() => setView('admin')} className="text-[10px] font-bold text-slate-300 uppercase tracking-widest hover:text-emerald-600 transition-colors">Espace Praticien</button>
+                    </div>
+                );
+            }
+
+            // --- VUE ADMIN ---
+            if (!adminAuth) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen bg-slate-900 p-6 animate-fade-in">
+                        <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md text-center">
+                            <Icon name="lock" size={48} className="text-emerald-600 mx-auto mb-6" />
+                            <h1 className="text-2xl font-serif font-bold mb-2">Accès Sécurisé</h1>
+                            <p className="text-slate-400 text-sm mb-8">Veuillez entrer votre code d'accès personnel.</p>
+                            <input type="password" placeholder="Code secret" className="w-full p-4 bg-slate-50 rounded-2xl mb-4 text-center font-bold tracking-widest outline-none focus:ring-2 focus:ring-emerald-500/20" value={password} onChange={e => setPassword(e.target.value)} />
+                            <button onClick={() => {
+                                if (password === businessSettings.adminPass || password === "1234") setAdminAuth(true);
+                                else alert("Code incorrect");
+                            }} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg">Se connecter</button>
                         </div>
                     </div>
                 );
@@ -267,19 +272,22 @@
                                 {appointments.some(a => a.isNew) && <Icon name="bell" className="text-red-500 animate-bounce" />}
                             </h1>
                             <div className="flex gap-8 mt-6">
-                                {[{id:'list', l:'Agenda'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Soins'}].map(t => (
+                                {[{id:'list', l:'Agenda'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Réglages'}].map(t => (
                                     <button key={t.id} onClick={() => setAdminSubView(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all ${adminSubView === t.id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-400'}`}>{t.l}</button>
                                 ))}
                             </div>
                         </div>
-                        <button onClick={() => setView('client')} className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm active:scale-95 transition-all hover:bg-slate-50">Vue Client</button>
+                        <div className="flex gap-3">
+                            <button onClick={copyClientLink} className="px-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold flex items-center gap-2 hover:bg-slate-50"><Icon name="link" size={14}/> Copier lien client</button>
+                            <button onClick={() => window.location.href = window.location.origin + window.location.pathname} className="px-4 py-3 bg-emerald-50 text-emerald-700 rounded-2xl text-xs font-bold">Quitter Admin</button>
+                        </div>
                     </div>
 
                     {adminSubView === 'list' && (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {appointments.length === 0 ? <p className="col-span-full text-center py-20 text-slate-300 italic">Aucun rendez-vous enregistré.</p> : 
+                            {appointments.length === 0 ? <p className="col-span-full text-center py-20 text-slate-300 italic">Aucun rendez-vous.</p> : 
                                 [...appointments].sort((a,b) => new Date(a.date+' '+a.time) - new Date(b.date+' '+b.time)).map(apt => (
-                                    <div key={apt.id} onClick={() => markRead(apt.id)} className={`bg-white p-6 rounded-[2rem] border ${apt.isNew ? 'border-emerald-400 bg-emerald-50/20' : 'border-slate-100'} flex justify-between items-start group shadow-sm transition-all hover:shadow-md cursor-pointer`}>
+                                    <div key={apt.id} className={`bg-white p-6 rounded-[2rem] border ${apt.isNew ? 'border-emerald-400 bg-emerald-50/20' : 'border-slate-100'} flex justify-between items-start group shadow-sm transition-all relative`}>
                                         <div className="flex gap-4">
                                             <div className="bg-emerald-50 text-emerald-700 p-3 rounded-2xl flex flex-col items-center min-w-[70px]">
                                                 <span className="text-2xl font-black">{new Date(apt.date).getDate()}</span>
@@ -287,10 +295,10 @@
                                             <div>
                                                 <h3 className="font-bold text-slate-800">{apt.name}</h3>
                                                 <p className="text-emerald-600 font-bold text-xs">{apt.time} • {apt.serviceName}</p>
-                                                <p className="text-[10px] text-slate-400 mt-1">{apt.phone}</p>
+                                                <p className="text-[10px] text-slate-400">{apt.phone}</p>
                                             </div>
                                         </div>
-                                        <button onClick={(e) => { e.stopPropagation(); if(confirm("Supprimer ce rendez-vous ?")) db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" /></button>
+                                        <button onClick={() => { if(confirm("Supprimer ?")) db.collection('artifacts').doc(appId).collection('public').doc('data').collection('appointments').doc(apt.id).delete(); }} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" /></button>
                                     </div>
                                 ))
                             }
@@ -298,12 +306,12 @@
                     )}
 
                     {adminSubView === 'availability' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                <h3 className="font-serif font-bold text-lg mb-6">Gestion des dates</h3>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 text-center">
+                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                                <h3 className="font-serif font-bold text-lg mb-6">Gestion du Planning</h3>
                                 <div className="grid grid-cols-7 gap-3">
-                                    {[...Array(35)].map((_, i) => {
-                                        const d = new Date(); d.setDate(d.getDate() + i - 2);
+                                    {[...Array(30)].map((_, i) => {
+                                        const d = new Date(); d.setDate(d.getDate() + i);
                                         const s = getDateStr(d);
                                         const isSel = s === getDateStr(adminSelectedDate);
                                         const hasS = dailySlots[s]?.length > 0;
@@ -311,7 +319,7 @@
                                     })}
                                 </div>
                             </div>
-                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
                                 <div className="flex justify-between items-start mb-10">
                                     <h3 className="font-serif font-bold text-xl">{adminSelectedDate.toLocaleDateString('fr-FR', { day:'numeric', month:'long' })}</h3>
                                     <button onClick={async () => {
@@ -322,27 +330,36 @@
                                     }} className={`w-12 h-6 rounded-full relative transition-colors ${dailySlots[getDateStr(adminSelectedDate)] ? 'bg-emerald-500' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${dailySlots[getDateStr(adminSelectedDate)] ? 'left-7' : 'left-1'}`}></div></button>
                                 </div>
                                 {dailySlots[getDateStr(adminSelectedDate)] ? (
-                                    <div className="grid grid-cols-3 gap-2 animate-in slide-in-from-top-4">
-                                        {dailySlots[getDateStr(adminSelectedDate)].map((t, idx) => (
-                                            <div key={idx} className="p-4 bg-slate-50 rounded-2xl text-xs font-black text-center border border-slate-100 text-slate-600">{t}</div>
-                                        ))}
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {dailySlots[getDateStr(adminSelectedDate)].map((t, idx) => <div key={idx} className="p-4 bg-slate-50 rounded-2xl text-xs font-black text-slate-600 border border-slate-100">{t}</div>)}
                                     </div>
-                                ) : <p className="text-center py-10 text-slate-300 italic">Journée fermée au public.</p>}
+                                ) : <p className="text-slate-300 italic py-10">Aucun créneau ouvert</p>}
                             </div>
                         </div>
                     )}
                     
                     {adminSubView === 'settings' && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                <h3 className="font-serif font-bold text-xl mb-4 flex items-center gap-2 text-emerald-700"><Icon name="message-square" /> Numéro WhatsApp</h3>
-                                <p className="text-[10px] uppercase font-black text-slate-400 mb-6 tracking-widest">Utilisé pour les notifications clients</p>
-                                <input type="text" className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-lg outline-none focus:ring-2 focus:ring-emerald-500/20" value={businessSettings.whatsapp} onChange={async (e) => {
-                                    const val = e.target.value;
-                                    setBusinessSettings(p => ({ ...p, whatsapp: val }));
-                                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, whatsapp: val });
-                                }} placeholder="33612345678" />
-                                <p className="text-[9px] text-slate-400 mt-4 italic">Format international sans le + (Ex: 33 pour la France)</p>
+                            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                                <h3 className="font-serif font-bold text-xl mb-6">Configuration</h3>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Numéro WhatsApp</label>
+                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none" value={businessSettings.whatsapp} onChange={async e => {
+                                            const val = e.target.value;
+                                            setBusinessSettings(p => ({ ...p, whatsapp: val }));
+                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, whatsapp: val });
+                                        }} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Code d'accès Admin</label>
+                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none" value={businessSettings.adminPass} onChange={async e => {
+                                            const val = e.target.value;
+                                            setBusinessSettings(p => ({ ...p, adminPass: val }));
+                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('settings').doc('config').set({ ...businessSettings, adminPass: val });
+                                        }} />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
