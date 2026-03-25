@@ -1,0 +1,493 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  addDoc, 
+  onSnapshot, 
+  setDoc, 
+  deleteDoc,
+  query
+} from 'firebase/firestore';
+import { 
+  Calendar as CalendarIcon, 
+  Clock, 
+  User, 
+  Mail, 
+  Phone, 
+  CheckCircle, 
+  ChevronLeft, 
+  ChevronRight,
+  Settings as SettingsIcon,
+  CalendarDays,
+  Download,
+  Plus,
+  Lock,
+  X,
+  CalendarCheck,
+  Trash2,
+  Zap,
+  Coffee,
+  Sun,
+  Moon,
+  Edit2,
+  Save,
+  RefreshCcw,
+  MessageSquare,
+  Bell
+} from 'lucide-react';
+
+// --- Configuration Firebase Personnalisée ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDV_kmvQC6yAtA95efs33S17SiYopp0r2c",
+  authDomain: "ak-minstep-consult-tracker.firebaseapp.com",
+  projectId: "ak-minstep-consult-tracker",
+  storageBucket: "ak-minstep-consult-tracker.firebasestorage.app",
+  messagingSenderId: "1076236018116",
+  appId: "1:1076236018116:web:43bc905a807e0410528491"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'massage-booking-zenflow-sync';
+
+const DEFAULT_MASSAGES = [
+  { id: 'relax', name: 'Massage Relaxant', duration: 60, price: 70 },
+  { id: 'deep', name: 'Deep Tissue', duration: 60, price: 85 },
+  { id: 'sport', name: 'Massage Sportif', duration: 45, price: 65 },
+];
+
+const MONTHS_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('client'); 
+  const [adminSubView, setAdminSubView] = useState('list'); 
+  const [appointments, setAppointments] = useState([]);
+  const [dailySlots, setDailySlots] = useState({}); 
+  const [massageTypes, setMassageTypes] = useState([]);
+  const [businessSettings, setBusinessSettings] = useState({ whatsapp: "33600000000" }); // Votre numéro par défaut
+  
+  // États client
+  const [step, setStep] = useState(1);
+  const [selectedService, setSelectedService] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedTime, setSelectedTime] = useState(null);
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', notes: '' });
+  
+  // États admin
+  const [adminSelectedDate, setAdminSelectedDate] = useState(new Date());
+  const [newTimeInput, setNewTimeInput] = useState("09:00");
+  const [newService, setNewService] = useState({ name: '', duration: 60, price: 50 });
+  
+  const [loading, setLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(true);
+
+  // --- Authentification ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          try { await signInWithCustomToken(auth, __initial_auth_token); } 
+          catch (e) { await signInAnonymously(auth); }
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error("Auth error:", err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsubscribe();
+  }, []);
+
+  // --- Synchronisation Cloud (Public) ---
+  useEffect(() => {
+    if (!user) return;
+    setIsSyncing(true);
+
+    const aptsRef = collection(db, 'artifacts', appId, 'public', 'data', 'appointments');
+    const unsubApts = onSnapshot(aptsRef, (snap) => {
+      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setIsSyncing(false);
+    });
+
+    const availDoc = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'availability');
+    const unsubAvail = onSnapshot(availDoc, (snap) => {
+      if (snap.exists()) setDailySlots(snap.data().slots || {});
+    });
+
+    const settingsDoc = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config');
+    const unsubSettings = onSnapshot(settingsDoc, (snap) => {
+      if (snap.exists()) setBusinessSettings(snap.data());
+    });
+
+    const servicesDoc = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'services');
+    const unsubServices = onSnapshot(servicesDoc, (snap) => {
+      if (snap.exists()) setMassageTypes(snap.data().list || DEFAULT_MASSAGES);
+      else {
+        setDoc(servicesDoc, { list: DEFAULT_MASSAGES });
+        setMassageTypes(DEFAULT_MASSAGES);
+      }
+    });
+
+    return () => {
+      unsubApts();
+      unsubAvail();
+      unsubSettings();
+      unsubServices();
+    };
+  }, [user]);
+
+  // --- Logique Métier ---
+  const getDateStr = (d) => d.toISOString().split('T')[0];
+
+  const getAvailableSlots = (date) => {
+    const s = getDateStr(date);
+    const slots = dailySlots[s] || [];
+    const booked = appointments
+      .filter(a => String(a.date) === s)
+      .map(a => String(a.time));
+    return slots.filter(t => !booked.includes(t)).sort();
+  };
+
+  // --- Notification WhatsApp ---
+  const openWhatsAppConfirmation = (booking) => {
+    const phone = businessSettings.whatsapp || "33600000000";
+    const dateFormatted = new Date(booking.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const text = `Bonjour ! Nouveau rendez-vous massage 💆‍♂️%0A%0A*Client :* ${booking.name}%0A*Soin :* ${booking.serviceName}%0A*Date :* ${dateFormatted}%0A*Heure :* ${booking.time}%0A*Tél :* ${booking.phone}%0A*Notes :* ${booking.notes || 'Aucune'}`;
+    window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+  };
+
+  // --- Handlers ---
+  const handleBooking = async () => {
+    if (!user || !selectedService || !selectedTime) return;
+    setLoading(true);
+    const booking = {
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      notes: formData.notes,
+      serviceName: selectedService.name,
+      date: getDateStr(selectedDate),
+      time: selectedTime,
+      createdAt: new Date().toISOString(),
+      userId: user.uid,
+      isNew: true // Pour la pastille de notification admin
+    };
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), booking);
+      setStep(4);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateBusinessSetting = async (key, val) => {
+    if (!user) return;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { ...businessSettings, [key]: val });
+  };
+
+  const markAsRead = async (id) => {
+    if (!user) return;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', id), { isNew: false }, { merge: true });
+  };
+
+  const downloadICS = (apt) => {
+    if (!apt?.date || !apt?.time) return;
+    const parts = apt.date.split('-');
+    const tParts = apt.time.split(':');
+    const start = new Date(parts[0], parts[1]-1, parts[2], tParts[0], tParts[1]);
+    const end = new Date(start.getTime() + 60*60000);
+    const f = (d) => d.toISOString().replace(/-|:|\.\d+/g, '');
+    const ics = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ZenFlow//FR',
+      'BEGIN:VEVENT', `DTSTART:${f(start)}`, `DTEND:${f(end)}`,
+      `SUMMARY:Massage ${apt.serviceName} - ${apt.name}`, `DESCRIPTION:Tel: ${apt.phone}`,
+      'END:VEVENT', 'END:VCALENDAR'
+    ].join('\n');
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.setAttribute('download', `rdv-${apt.date}.ics`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans antialiased text-slate-900">
+      
+      {/* Témoin de Synchronisation Cloud */}
+      <div className="fixed top-4 right-4 z-50">
+        {isSyncing ? (
+          <RefreshCcw className="text-emerald-600 animate-spin" size={18} />
+        ) : (
+          <div className="flex items-center gap-2 bg-white/80 backdrop-blur px-3 py-1.5 rounded-full shadow-sm border border-emerald-50 text-[10px] font-bold text-emerald-600">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+            EN DIRECT
+          </div>
+        )}
+      </div>
+
+      {view === 'client' ? (
+        /* VUE CLIENT */
+        <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col border-x border-slate-100">
+          <div className="bg-emerald-800 p-10 text-white text-center shadow-lg relative overflow-hidden">
+            <div className="relative z-10">
+              <h1 className="text-4xl font-serif font-bold tracking-tight mb-1">ZenFlow</h1>
+              <p className="text-emerald-100/80 text-[10px] font-bold uppercase tracking-[0.3em]">Soin & Sérénité</p>
+            </div>
+          </div>
+
+          <div className="p-6 flex-grow overflow-y-auto">
+            {step === 1 && (
+              <div className="space-y-4 animate-in fade-in duration-500">
+                <h2 className="text-xl font-semibold text-slate-800 mb-8 text-center font-serif">Sélectionnez votre soin</h2>
+                {massageTypes.map(s => (
+                  <button key={s.id} onClick={() => { setSelectedService(s); setStep(2); }} className="w-full text-left p-6 bg-white border border-slate-100 rounded-3xl hover:shadow-xl hover:border-emerald-200 transition-all flex justify-between items-center group active:scale-95">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-lg group-hover:text-emerald-700">{s.name}</h3>
+                      <p className="text-xs text-slate-400 font-bold tracking-tight">{s.duration} min • {s.price}€</p>
+                    </div>
+                    <ChevronRight className="text-slate-200 group-hover:text-emerald-600" size={24} />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 uppercase flex items-center gap-1 hover:underline"><ChevronLeft size={16} /> Retour</button>
+                <div className="space-y-4">
+                  <h2 className="text-xl font-serif font-semibold text-slate-800 text-center">Date & Heure</h2>
+                  <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100">
+                     <div className="flex justify-between items-center mb-6 px-2 text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                        <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(d); }}><ChevronLeft size={20}/></button>
+                        <span>{MONTHS_FR[selectedDate.getMonth()]} {selectedDate.getFullYear()}</span>
+                        <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 7); setSelectedDate(d); }}><ChevronRight size={20}/></button>
+                     </div>
+                     <div className="grid grid-cols-7 gap-2">
+                       {[...Array(7)].map((_, i) => {
+                         const d = new Date(selectedDate); d.setDate(selectedDate.getDate() - selectedDate.getDay() + i);
+                         const isSel = d.toDateString() === selectedDate.toDateString();
+                         const slots = getAvailableSlots(d);
+                         const hasS = slots.length > 0;
+                         const isPast = d < new Date(new Date().setHours(0,0,0,0));
+                         return (
+                           <button key={`cd-${i}`} disabled={isPast || !hasS} onClick={() => setSelectedDate(d)} className={`aspect-square flex flex-col items-center justify-center rounded-2xl text-xs transition-all relative ${isSel ? 'bg-emerald-600 text-white shadow-lg' : 'hover:bg-emerald-50'} ${(!hasS || isPast) ? 'opacity-10 cursor-not-allowed' : 'font-black text-slate-700'}`}>
+                             {d.getDate()}
+                             {hasS && !isSel && !isPast && <div className="absolute bottom-2 w-1 h-1 bg-emerald-400 rounded-full"></div>}
+                           </button>
+                         );
+                       })}
+                     </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-4">
+                    {getAvailableSlots(selectedDate).map((time, idx) => (
+                      <button key={`cs-${idx}`} onClick={() => setSelectedTime(time)} className={`py-4 border-2 rounded-2xl text-xs font-black transition-all ${selectedTime === time ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg' : 'bg-white border-slate-50 text-slate-500'}`}>{time}</button>
+                    ))}
+                  </div>
+                </div>
+                {selectedTime && <button onClick={() => setStep(3)} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">Suivant</button>}
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-6 animate-in fade-in">
+                <button onClick={() => setStep(2)} className="text-xs font-bold text-emerald-700 uppercase flex items-center gap-1 hover:underline"><ChevronLeft size={16} /> Retour</button>
+                <div className="space-y-4">
+                  <input type="text" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] text-sm" placeholder="Votre nom" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                  <input type="tel" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] text-sm" placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                  <textarea className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] min-h-[100px] text-sm" placeholder="Notes (facultatif)" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                </div>
+                <button disabled={!formData.name || !formData.phone || loading} onClick={handleBooking} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-bold shadow-xl active:scale-95">
+                  {loading ? "Chargement..." : "Confirmer le rendez-vous"}
+                </button>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div className="text-center py-16 space-y-8 animate-in zoom-in-95 duration-500">
+                <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-600 shadow-inner">
+                  <CheckCircle size={64} />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-3xl font-serif font-bold text-slate-800">C'est réservé !</h2>
+                  <p className="text-slate-400 text-sm">Pour finaliser, cliquez sur le bouton ci-dessous pour m'envoyer la confirmation.</p>
+                </div>
+                
+                <button 
+                  onClick={() => openWhatsAppConfirmation({
+                    name: formData.name,
+                    phone: formData.phone,
+                    serviceName: selectedService.name,
+                    date: getDateStr(selectedDate),
+                    time: selectedTime,
+                    notes: formData.notes
+                  })}
+                  className="w-full bg-[#25D366] text-white py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:bg-[#20bd5a] transition-all"
+                >
+                  <MessageSquare size={20} /> Envoyer sur WhatsApp
+                </button>
+
+                <button onClick={() => downloadICS({ date: getDateStr(selectedDate), time: selectedTime, serviceName: selectedService.name, name: formData.name, phone: formData.phone })} className="w-full bg-white border-2 border-emerald-600 text-emerald-600 py-5 rounded-[2rem] font-bold hover:bg-emerald-50 active:scale-95">
+                  <CalendarIcon size={20} className="inline mr-2" /> Ajouter à mon iPhone
+                </button>
+                <button onClick={() => { setStep(1); setSelectedService(null); setSelectedTime(null); }} className="text-slate-400 font-bold text-xs uppercase hover:text-emerald-700 transition-colors">Prendre un autre RDV</button>
+              </div>
+            )}
+          </div>
+          <div className="p-4 border-t bg-slate-50 text-center">
+            <button onClick={() => setView('admin')} className="text-[10px] font-bold text-slate-300 uppercase tracking-widest hover:text-emerald-700 transition-colors">Espace Praticien</button>
+          </div>
+        </div>
+      ) : (
+        /* VUE ADMIN */
+        <div className="max-w-6xl mx-auto p-6 md:p-10 min-h-screen">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+            <div>
+              <h1 className="text-4xl font-serif font-bold text-gray-900 flex items-center gap-3">
+                ZenFlow Admin 
+                {appointments.some(a => a.isNew) && <Bell className="text-red-500 animate-bounce" size={24} />}
+              </h1>
+              <div className="flex gap-8 mt-6">
+                {[{id:'list', l:'Agenda'}, {id:'availability', l:'Planning'}, {id:'settings', l:'Réglages'}].map(t => (
+                  <button key={t.id} onClick={() => setAdminSubView(t.id)} className={`text-[10px] font-black uppercase tracking-widest pb-3 border-b-2 transition-all ${adminSubView === t.id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-400'}`}>{t.l}</button>
+                ))}
+              </div>
+            </div>
+            <button onClick={() => setView('client')} className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 shadow-sm hover:shadow-md transition-all">Vue Client</button>
+          </div>
+
+          {adminSubView === 'list' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in">
+              {appointments.length === 0 ? <p className="col-span-full text-center py-20 text-slate-300 italic">Aucun rendez-vous enregistré.</p> : 
+                [...appointments].sort((a,b) => new Date(a.date+' '+a.time) - new Date(b.date+' '+b.time)).map(apt => (
+                  <div key={apt.id} onClick={() => markAsRead(apt.id)} className={`bg-white p-6 rounded-[2rem] shadow-sm border ${apt.isNew ? 'border-emerald-400 bg-emerald-50/20' : 'border-slate-100'} flex justify-between items-start group hover:shadow-md transition-all relative`}>
+                    {apt.isNew && <div className="absolute -top-2 -right-2 bg-red-500 text-white text-[8px] font-bold px-2 py-1 rounded-full shadow-lg">NOUVEAU</div>}
+                    <div className="flex gap-4">
+                      <div className="bg-emerald-50 text-emerald-700 p-3 rounded-2xl flex flex-col items-center min-w-[70px]">
+                        <span className="text-[10px] uppercase font-black">{new Date(apt.date).toLocaleDateString('fr-FR', { weekday:'short' })}</span>
+                        <span className="text-2xl font-black leading-none">{new Date(apt.date).getDate()}</span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-800">{apt.name}</h3>
+                        <p className="text-emerald-600 font-bold text-sm">{apt.time} • {apt.serviceName}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">{apt.phone}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); downloadICS(apt); }} className="p-2 text-slate-400 hover:text-emerald-600"><Download size={18}/></button>
+                      <button onClick={(e) => { e.stopPropagation(); if(confirm("Supprimer ?")) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', apt.id)); }} className="p-2 text-slate-400 hover:text-red-500"><Trash2 size={18}/></button>
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+
+          {adminSubView === 'availability' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
+              {/* Le code de gestion des dates reste identique pour la flexibilité */}
+              <div className="lg:col-span-5 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+                <h3 className="font-serif font-bold text-slate-800 text-lg mb-6">Gérer les dates</h3>
+                <div className="bg-slate-50 p-6 rounded-[2rem]">
+                  <div className="flex justify-between items-center mb-6 px-2 font-bold uppercase text-[10px] tracking-widest text-slate-400">
+                    <button onClick={() => { const d = new Date(adminSelectedDate); d.setMonth(d.getMonth()-1); setAdminSelectedDate(d); }}><ChevronLeft size={20}/></button>
+                    <span>{MONTHS_FR[adminSelectedDate.getMonth()]} {adminSelectedDate.getFullYear()}</span>
+                    <button onClick={() => { const d = new Date(adminSelectedDate); d.setMonth(d.getMonth()+1); setAdminSelectedDate(d); }}><ChevronRight size={20}/></button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-3">
+                    {[...Array(new Date(adminSelectedDate.getFullYear(), adminSelectedDate.getMonth(), 1).getDay())].map((_,i) => <div key={`e-${i}`}></div>)}
+                    {[...Array(new Date(adminSelectedDate.getFullYear(), adminSelectedDate.getMonth()+1, 0).getDate())].map((_,i) => {
+                      const d = new Date(adminSelectedDate.getFullYear(), adminSelectedDate.getMonth(), i+1);
+                      const s = getDateStr(d);
+                      const isSel = s === getDateStr(adminSelectedDate);
+                      const hasS = dailySlots[s]?.length > 0;
+                      return <button key={`ad-${i}`} onClick={() => setAdminSelectedDate(d)} className={`aspect-square rounded-xl text-xs font-bold relative transition-all ${isSel ? 'bg-emerald-600 text-white scale-110 shadow-lg' : 'bg-white hover:bg-emerald-50'} ${hasS && !isSel ? 'text-emerald-600 ring-2 ring-emerald-100' : 'text-slate-400'}`}>{i+1}</button>;
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="lg:col-span-7 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
+                <div className="flex justify-between items-start mb-10">
+                  <h3 className="font-serif font-bold text-slate-800 text-xl">{adminSelectedDate.toLocaleDateString('fr-FR', { day:'numeric', month:'long' })}</h3>
+                  <button onClick={toggleDay} className={`w-12 h-6 rounded-full relative transition-colors ${dailySlots[getDateStr(adminSelectedDate)]?.length > 0 ? 'bg-emerald-500' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${dailySlots[getDateStr(adminSelectedDate)]?.length > 0 ? 'left-7' : 'left-1'}`}></div></button>
+                </div>
+                {dailySlots[getDateStr(adminSelectedDate)]?.length > 0 ? (
+                  <div className="space-y-8 animate-in slide-in-from-top-4">
+                    <div className="flex gap-2">
+                      <input type="time" value={newTimeInput} onChange={e => setNewTimeInput(e.target.value)} className="flex-grow p-4 bg-slate-50 border-none rounded-2xl font-bold" />
+                      <button onClick={() => addSlot()} className="bg-emerald-600 text-white p-4 rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-100"><Plus size={24}/></button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      {dailySlots[getDateStr(adminSelectedDate)].map((t, idx) => (
+                        <div key={`sa-${idx}`} className="flex justify-between items-center p-3 bg-white border border-slate-100 rounded-xl font-bold text-xs shadow-sm">{t}<button onClick={() => removeSlot(t)} className="text-gray-300 hover:text-red-500"><X size={14}/></button></div>
+                      ))}
+                    </div>
+                  </div>
+                ) : <div className="text-center py-20 opacity-30 italic text-slate-500">Journée fermée.</div>}
+              </div>
+            </div>
+          )}
+
+          {adminSubView === 'settings' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
+              <div className="lg:col-span-7 space-y-4">
+                <h3 className="font-serif font-bold text-slate-800 text-xl mb-6">Configuration de l'activité</h3>
+                
+                {/* Réglage Numéro WhatsApp */}
+                <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-4">
+                  <div>
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2"><MessageSquare size={18} className="text-[#25D366]"/> Votre numéro WhatsApp</h4>
+                    <p className="text-xs text-slate-400 mt-1">Format international sans le + (ex: 33612345678 pour la France)</p>
+                  </div>
+                  <input 
+                    type="text" 
+                    className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold"
+                    placeholder="336..."
+                    value={businessSettings.whatsapp || ""}
+                    onChange={(e) => updateBusinessSetting('whatsapp', e.target.value)}
+                  />
+                </div>
+
+                <h3 className="font-serif font-bold text-slate-800 text-xl mt-10 mb-6">Vos Prestations</h3>
+                {massageTypes.map(s => (
+                  <div key={s.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex justify-between items-center">
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-lg">{s.name}</h4>
+                      <p className="text-sm text-slate-400 font-medium">{s.duration} min • {s.price} €</p>
+                    </div>
+                    <button onClick={() => { if(confirm("Supprimer ?")) updateServices(massageTypes.filter(m => m.id !== s.id)); }} className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"><Trash2 size={20}/></button>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="lg:col-span-5 bg-emerald-50/50 p-8 rounded-[2.5rem] border border-emerald-100 sticky top-10">
+                <h3 className="font-bold text-emerald-800 mb-6 flex items-center gap-2 font-serif text-lg"><Plus size={20}/> Nouveau Soin</h3>
+                <div className="space-y-4">
+                  <input type="text" className="w-full p-4 bg-white border-none rounded-2xl shadow-sm" placeholder="Nom du soin" value={newService.name} onChange={e => setNewService({...newService, name: e.target.value})} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <input type="number" className="w-full p-4 bg-white border-none rounded-2xl shadow-sm" placeholder="Min" value={newService.duration} onChange={e => setNewService({...newService, duration: parseInt(e.target.value)})} />
+                    <input type="number" className="w-full p-4 bg-white border-none rounded-2xl shadow-sm" placeholder="Prix" value={newService.price} onChange={e => setNewService({...newService, price: parseInt(e.target.value)})} />
+                  </div>
+                  <button onClick={() => { if(newService.name) { updateServices([...massageTypes, {...newService, id: Date.now().toString()}]); setNewService({name:'', duration:60, price:50}); } }} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all active:scale-[0.98]">Créer</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
